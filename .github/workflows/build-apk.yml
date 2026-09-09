@@ -24,7 +24,7 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Install Android SDK 36
-        run: yes | sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+        run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
       - name: Set up Gradle 8.13
         uses: gradle/actions/setup-gradle@v4
@@ -38,6 +38,26 @@ jobs:
           unzip -q goldencareer-android-source-v1.0.1.zip -d android-src
           test -f android-src/settings.gradle.kts
           test -f android-src/app/build.gradle.kts
+
+      - name: Pin API-36-compatible AndroidX versions
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('android-src/app/build.gradle.kts')
+          s = p.read_text()
+          s = s.replace('    val composeBom = platform("androidx.compose:compose-bom:2026.08.00")\n    implementation(composeBom)\n    androidTestImplementation(composeBom)\n', '')
+          s = s.replace('androidx.activity:activity-compose:1.13.0', 'androidx.activity:activity-compose:1.11.0')
+          s = s.replace('androidx.lifecycle:lifecycle-runtime-ktx:2.10.0', 'androidx.lifecycle:lifecycle-runtime-ktx:2.9.4')
+          s = s.replace('androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0', 'androidx.lifecycle:lifecycle-viewmodel-compose:2.9.4')
+          s = s.replace('implementation("androidx.compose.material3:material3")', 'implementation("androidx.compose.material3:material3:1.4.0")')
+          s = s.replace('implementation("androidx.compose.material:material-icons-extended")', 'implementation("androidx.compose.material:material-icons-extended:1.11.4")')
+          s = s.replace('implementation("androidx.compose.foundation:foundation")', 'implementation("androidx.compose.foundation:foundation:1.11.4")')
+          s = s.replace('implementation("androidx.compose.ui:ui")', 'implementation("androidx.compose.ui:ui:1.11.4")')
+          s = s.replace('implementation("androidx.compose.ui:ui-tooling-preview")', 'implementation("androidx.compose.ui:ui-tooling-preview:1.11.4")')
+          s = s.replace('debugImplementation("androidx.compose.ui:ui-tooling")', 'debugImplementation("androidx.compose.ui:ui-tooling:1.11.4")')
+          p.write_text(s)
+          print(p.read_text())
+          PY
 
       - name: Build debug APK and release AAB
         working-directory: android-src
