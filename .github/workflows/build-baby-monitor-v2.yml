@@ -23,6 +23,10 @@ jobs:
           rm -rf /tmp/bm2
           mkdir -p /tmp/bm2
           unzip -q /tmp/BabyMonitorV2_Source.zip -d /tmp/bm2
+          FILE=/tmp/bm2/BabyMonitorV2/app/src/main/java/com/babymonitor/privateapp/ParentMonitorService.java
+          sed -i 's/private RtcRuntime rtc;private AudioSource audioSource;private AudioTrack localAudio,remoteAudio;private VideoTrack remoteVideo;private ParentPeer peer;/private RtcRuntime rtc;private AudioSource audioSource;private org.webrtc.AudioTrack localAudio,remoteAudio;private VideoTrack remoteVideo;private ParentPeer peer;/' "$FILE"
+          sed -i 's/public void onRemoteAudio(AudioTrack t)/public void onRemoteAudio(org.webrtc.AudioTrack t)/' "$FILE"
+          sed -i 's/AudioTrack a=remoteAudio;/org.webrtc.AudioTrack a=remoteAudio;/' "$FILE"
           ls -la /tmp/bm2/BabyMonitorV2
 
       - name: Set up Java 17
@@ -46,9 +50,11 @@ jobs:
           APK=/tmp/bm2/BabyMonitorV2/app/build/outputs/apk/release/app-release.apk
           test -s "$APK"
           unzip -t "$APK"
-          $ANDROID_HOME/build-tools/35.0.0/apksigner verify --verbose "$APK" || $ANDROID_HOME/build-tools/35.0.1/apksigner verify --verbose "$APK"
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/35.* | sort -V | tail -1)
+          "$BT/apksigner" verify --verbose "$APK"
           sha256sum "$APK" | tee /tmp/BabyMonitor_Private_v2.0.0.apk.sha256
           cp "$APK" /tmp/BabyMonitor_Private_v2.0.0.apk
+          cd /tmp/bm2 && zip -qr /tmp/BabyMonitorV2_Source_compiled.zip BabyMonitorV2
 
       - name: Upload V2 install package
         uses: actions/upload-artifact@v4
@@ -57,5 +63,5 @@ jobs:
           path: |
             /tmp/BabyMonitor_Private_v2.0.0.apk
             /tmp/BabyMonitor_Private_v2.0.0.apk.sha256
-            /tmp/BabyMonitorV2_Source.zip
+            /tmp/BabyMonitorV2_Source_compiled.zip
           if-no-files-found: error
