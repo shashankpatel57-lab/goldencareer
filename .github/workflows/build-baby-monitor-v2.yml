@@ -1,0 +1,61 @@
+name: Build Baby Monitor V2 APK
+on:
+  push:
+    branches: [ baby-monitor-build ]
+    paths:
+      - 'baby_monitor_v2_payload/**'
+      - '.github/workflows/build-baby-monitor-v2.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Reconstruct V2 source
+        shell: bash
+        run: |
+          cat baby_monitor_v2_payload/part00.b64 baby_monitor_v2_payload/part01.b64 baby_monitor_v2_payload/part02.b64 baby_monitor_v2_payload/part03.b64 > /tmp/BabyMonitorV2_Source.zip.b64
+          base64 -d /tmp/BabyMonitorV2_Source.zip.b64 > /tmp/BabyMonitorV2_Source.zip
+          unzip -t /tmp/BabyMonitorV2_Source.zip
+          rm -rf /tmp/bm2
+          mkdir -p /tmp/bm2
+          unzip -q /tmp/BabyMonitorV2_Source.zip -d /tmp/bm2
+          ls -la /tmp/bm2/BabyMonitorV2
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Build private V2 release APK
+        working-directory: /tmp/bm2/BabyMonitorV2
+        run: gradle :app:assembleRelease --stacktrace
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          APK=/tmp/bm2/BabyMonitorV2/app/build/outputs/apk/release/app-release.apk
+          test -s "$APK"
+          unzip -t "$APK"
+          $ANDROID_HOME/build-tools/35.0.0/apksigner verify --verbose "$APK" || $ANDROID_HOME/build-tools/35.0.1/apksigner verify --verbose "$APK"
+          sha256sum "$APK" | tee /tmp/BabyMonitor_Private_v2.0.0.apk.sha256
+          cp "$APK" /tmp/BabyMonitor_Private_v2.0.0.apk
+
+      - name: Upload V2 install package
+        uses: actions/upload-artifact@v4
+        with:
+          name: BabyMonitor-Private-v2.0.0
+          path: |
+            /tmp/BabyMonitor_Private_v2.0.0.apk
+            /tmp/BabyMonitor_Private_v2.0.0.apk.sha256
+            /tmp/BabyMonitorV2_Source.zip
+          if-no-files-found: error
