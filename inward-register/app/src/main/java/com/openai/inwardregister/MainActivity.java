@@ -8,8 +8,6 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
 import android.text.InputType;
-import android.view.Gravity;
-import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
@@ -117,7 +115,7 @@ public class MainActivity extends Activity {
                 .setTitle("Close current session?")
                 .setMessage("Export first if you need the Excel file. Closing starts a fresh register and removes this session from the app.")
                 .setNegativeButton("Cancel", null)
-                .setPositiveButton("Close Session", (d,w) -> { store.closeSession(); render(); })
+                .setPositiveButton("Close Session", (dialog,which) -> { store.closeSession(); render(); })
                 .show());
         root.addView(close);
     }
