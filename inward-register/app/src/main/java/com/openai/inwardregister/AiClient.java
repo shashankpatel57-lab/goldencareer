@@ -1,27 +1,41 @@
 package com.openai.inwardregister;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.util.Base64;
+import android.graphics.Color;
 
-import org.json.JSONArray;
+import com.google.android.gms.tasks.Tasks;
+import com.google.mlkit.vision.common.InputImage;
+import com.google.mlkit.vision.text.TextRecognition;
+import com.google.mlkit.vision.text.TextRecognizer;
+import com.google.mlkit.vision.text.Text;
+import com.google.mlkit.vision.text.devanagari.DevanagariTextRecognizerOptions;
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions;
+
 import org.json.JSONObject;
 
-import java.io.BufferedReader;
-import java.io.ByteArrayOutputStream;
 import java.io.File;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
+/**
+ * Fully local document-intelligence engine. No network/API is used.
+ * It combines Latin + Devanagari OCR, an enhanced handwriting pass,
+ * fuzzy department classification, structured field extraction and
+ * extractive subject synthesis.
+ */
 public class AiClient {
     public interface Callback {
         void onSuccess(JSONObject data, String provider);
@@ -29,12 +43,15 @@ public class AiClient {
     }
 
     private final Context context;
-    private final AdminSettings settings;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
+
+    private static class OcrPage {
+        String mainText = "";
+        String handwritingText = "";
+    }
 
     public AiClient(Context context) {
         this.context = context.getApplicationContext();
-        this.settings = new AdminSettings(context);
     }
 
     public void extract(List<String> imagePaths, Callback cb) {
@@ -44,264 +61,332 @@ public class AiClient {
                     fail(cb, "No letter pages were captured.");
                     return;
                 }
-                List<String> images = new ArrayList<>();
-                for (String path : imagePaths) images.add(encodeImage(new File(path)));
 
-                StringBuilder errors = new StringBuilder();
-                List<String> grokKeys = settings.orderedKeys("grok");
-                for (String key : grokKeys) {
-                    try {
-                        JSONObject out = callGrok(key, images);
-                        success(cb, normalize(out), "Grok / " + settings.grokModel());
-                        return;
-                    } catch (ApiException e) {
-                        handleFailure("grok", key, e);
-                        errors.append("Grok: ").append(e.getMessage()).append("; ");
-                    } catch (Exception e) {
-                        errors.append("Grok: ").append(e.getMessage()).append("; ");
-                    }
+                StringBuilder document = new StringBuilder();
+                StringBuilder handwriting = new StringBuilder();
+                int readable = 0;
+                for (String path : imagePaths) {
+                    OcrPage p = readPage(new File(path));
+                    if (!p.mainText.trim().isEmpty()) readable++;
+                    document.append("\n").append(p.mainText);
+                    handwriting.append("\n").append(p.handwritingText);
                 }
 
-                List<String> geminiKeys = settings.orderedKeys("gemini");
-                for (String key : geminiKeys) {
-                    try {
-                        JSONObject out = callGemini(key, images);
-                        success(cb, normalize(out), "Gemini / " + settings.geminiModel());
-                        return;
-                    } catch (ApiException e) {
-                        handleFailure("gemini", key, e);
-                        errors.append("Gemini: ").append(e.getMessage()).append("; ");
-                    } catch (Exception e) {
-                        errors.append("Gemini: ").append(e.getMessage()).append("; ");
-                    }
+                if (readable == 0) {
+                    fail(cb, "Local OCR could not read the captured pages. Retake the photos in brighter light and keep the page flat.");
+                    return;
                 }
 
-                if (grokKeys.isEmpty() && geminiKeys.isEmpty()) {
-                    fail(cb, "No AI API key is configured. You can still enter the fields manually on the review screen.");
-                } else {
-                    fail(cb, errors.length() == 0 ? "AI extraction failed. Please review the fields manually." : errors.toString());
-                }
+                String text = cleanupDocument(document.toString());
+                String hand = cleanupDocument(handwriting.toString());
+                JSONObject out = new JSONObject();
+                out.put("Letter_No", extractLetterNo(text));
+                out.put("Letter_Date", extractLetterDate(text));
+                out.put("Sender", extractSender(text));
+                out.put("Department", extractDepartment(text + "\n" + hand));
+                String subject = extractExplicitSubject(text);
+                if (subject.isEmpty()) subject = synthesizeSubject(text);
+                out.put("Subject", subject);
+                out.put("Local_OCR_Text", trimTo(text, 9000));
+
+                success(cb, out, "Local Inward AI • English + Hindi • Offline");
             } catch (Exception e) {
-                fail(cb, "AI processing error: " + e.getMessage());
+                fail(cb, "Local AI processing error: " + e.getMessage());
             }
         });
     }
 
-    private void handleFailure(String provider, String key, ApiException e) {
-        long now = System.currentTimeMillis();
-        if (e.code == 429) {
-            long sec = e.retryAfterSeconds > 0 ? e.retryAfterSeconds : 60;
-            settings.setCooldown(provider, key, now + Math.min(sec, 3600) * 1000L);
-        } else if (e.code == 401 || e.code == 403) {
-            settings.setCooldown(provider, key, now + 6L * 60 * 60 * 1000);
+    private OcrPage readPage(File f) throws Exception {
+        Bitmap src = BitmapFactory.decodeFile(f.getAbsolutePath());
+        if (src == null) throw new Exception("Could not read " + f.getName());
+        Bitmap base = scale(src, 2200);
+        if (base != src) src.recycle();
+        Bitmap enhanced = enhanceForHandwriting(base);
+
+        String latin = recognize(base, false);
+        String dev = recognize(base, true);
+        String latinEnhanced = recognize(enhanced, false);
+        String devEnhanced = recognize(enhanced, true);
+
+        OcrPage p = new OcrPage();
+        p.mainText = mergeLines(latin, dev);
+        p.handwritingText = mergeLines(latinEnhanced, devEnhanced);
+        if (enhanced != base) enhanced.recycle();
+        base.recycle();
+        return p;
+    }
+
+    private String recognize(Bitmap bitmap, boolean devanagari) throws Exception {
+        TextRecognizer rec = devanagari
+                ? TextRecognition.getClient(new DevanagariTextRecognizerOptions.Builder().build())
+                : TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
+        try {
+            Text result = Tasks.await(rec.process(InputImage.fromBitmap(bitmap, 0)));
+            return result == null ? "" : result.getText();
+        } finally {
+            rec.close();
         }
     }
 
-    private JSONObject callGrok(String key, List<String> images) throws Exception {
-        JSONObject body = new JSONObject();
-        body.put("model", settings.grokModel());
-        body.put("temperature", 0.1);
-        body.put("response_format", grokResponseFormat());
-        JSONArray messages = new JSONArray();
-        JSONObject msg = new JSONObject();
-        msg.put("role", "user");
-        JSONArray content = new JSONArray();
-        for (String b64 : images) {
-            JSONObject part = new JSONObject();
-            part.put("type", "image_url");
-            JSONObject iu = new JSONObject();
-            iu.put("url", "data:image/jpeg;base64," + b64);
-            iu.put("detail", "high");
-            part.put("image_url", iu);
-            content.put(part);
+    private Bitmap scale(Bitmap src, int maxSide) {
+        int w = src.getWidth(), h = src.getHeight();
+        if (Math.max(w, h) <= maxSide) return src;
+        float s = maxSide / (float)Math.max(w, h);
+        return Bitmap.createScaledBitmap(src, Math.max(1, Math.round(w*s)), Math.max(1, Math.round(h*s)), true);
+    }
+
+    /** Strong local contrast pass that often reveals blue/black pen strokes and faint routing notes. */
+    private Bitmap enhanceForHandwriting(Bitmap src) {
+        int w = src.getWidth(), h = src.getHeight();
+        Bitmap out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        int[] px = new int[w*h];
+        src.getPixels(px, 0, w, 0, 0, w, h);
+        for (int i=0; i<px.length; i++) {
+            int c = px[i];
+            int r=Color.red(c), g=Color.green(c), b=Color.blue(c);
+            int gray = (r*30 + g*59 + b*11)/100;
+            int v;
+            if (gray > 210) v = 255;
+            else if (gray < 95) v = 0;
+            else {
+                v = (int)((gray - 128) * 1.65f + 128);
+                v = Math.max(0, Math.min(255, v));
+            }
+            px[i] = Color.rgb(v,v,v);
         }
-        JSONObject text = new JSONObject();
-        text.put("type", "text");
-        text.put("text", prompt());
-        content.put(text);
-        msg.put("content", content);
-        messages.put(msg);
-        body.put("messages", messages);
-
-        HttpResponse r = postJson("https://api.x.ai/v1/chat/completions", body.toString(), "Bearer " + key, null);
-        if (r.code < 200 || r.code >= 300) throw new ApiException(r.code, r.retryAfter, compactError(r.body));
-        JSONObject root = new JSONObject(r.body);
-        String txt = root.getJSONArray("choices").getJSONObject(0).getJSONObject("message").optString("content", "");
-        return parseJsonObject(txt);
-    }
-
-    private JSONObject callGemini(String key, List<String> images) throws Exception {
-        JSONObject body = new JSONObject();
-        JSONArray contents = new JSONArray();
-        JSONObject content = new JSONObject();
-        JSONArray parts = new JSONArray();
-        for (String b64 : images) {
-            JSONObject p = new JSONObject();
-            JSONObject inline = new JSONObject();
-            inline.put("mimeType", "image/jpeg");
-            inline.put("data", b64);
-            p.put("inlineData", inline);
-            parts.put(p);
-        }
-        JSONObject pt = new JSONObject();
-        pt.put("text", prompt());
-        parts.put(pt);
-        content.put("parts", parts);
-        contents.put(content);
-        body.put("contents", contents);
-        JSONObject cfg = new JSONObject();
-        cfg.put("temperature", 0.1);
-        cfg.put("responseMimeType", "application/json");
-        cfg.put("responseJsonSchema", letterSchema());
-        body.put("generationConfig", cfg);
-
-        String model = settings.geminiModel();
-        URL u = new URL("https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + key);
-        HttpResponse r = postJson(u.toString(), body.toString(), null, null);
-        if (r.code < 200 || r.code >= 300) throw new ApiException(r.code, r.retryAfter, compactError(r.body));
-        JSONObject root = new JSONObject(r.body);
-        String txt = root.getJSONArray("candidates").getJSONObject(0)
-                .getJSONObject("content").getJSONArray("parts").getJSONObject(0).optString("text", "");
-        return parseJsonObject(txt);
-    }
-
-    private JSONObject letterSchema() throws Exception {
-        JSONObject schema = new JSONObject();
-        schema.put("type", "object");
-        JSONObject props = new JSONObject();
-        String[] fields = {"Letter_No", "Letter_Date", "Sender", "Subject", "Department"};
-        JSONArray required = new JSONArray();
-        for (String f : fields) {
-            JSONObject v = new JSONObject();
-            v.put("type", "string");
-            props.put(f, v);
-            required.put(f);
-        }
-        schema.put("properties", props);
-        schema.put("required", required);
-        schema.put("additionalProperties", false);
-        return schema;
-    }
-
-    private JSONObject grokResponseFormat() throws Exception {
-        JSONObject root = new JSONObject();
-        root.put("type", "json_schema");
-        JSONObject js = new JSONObject();
-        js.put("name", "inward_letter_fields");
-        js.put("schema", letterSchema());
-        js.put("strict", true);
-        root.put("json_schema", js);
-        return root;
-    }
-
-    private String prompt() {
-        return "You are extracting fields from scanned physical incoming letters. Read ALL supplied pages as one letter. " +
-                "Return ONLY one JSON object with exactly these string keys: " +
-                "{\"Letter_No\":\"\",\"Letter_Date\":\"\",\"Sender\":\"\",\"Subject\":\"\",\"Department\":\"\"}. " +
-                "Rules: (1) Letter_No is the sender's/reference letter number, not a phone number or tracking ID. " +
-                "(2) Letter_Date is the date printed on the letter; preserve a clear human date format. " +
-                "(3) Sender should be concise but sufficiently identify the organization/person and office if visible. " +
-                "(4) Find the explicit Subject/विषय line. If absent, infer a brief one-line subject from the letter content, without inventing facts. " +
-                "(5) Department is especially important: inspect margins, stamps, routing marks and HANDWRITTEN PEN NOTES for a department/section name. " +
-                "If no department is visible, return an empty string. Do not include commentary, confidence scores or extra keys.";
-    }
-
-    private JSONObject normalize(JSONObject in) throws Exception {
-        JSONObject out = new JSONObject();
-        out.put("Letter_No", in.optString("Letter_No", "").trim());
-        out.put("Letter_Date", in.optString("Letter_Date", "").trim());
-        out.put("Sender", in.optString("Sender", "").trim());
-        out.put("Subject", in.optString("Subject", "").trim());
-        out.put("Department", in.optString("Department", "").trim());
+        out.setPixels(px,0,w,0,0,w,h);
         return out;
     }
 
-    private JSONObject parseJsonObject(String raw) throws Exception {
-        if (raw == null) throw new Exception("Empty model response");
-        String s = raw.trim();
-        if (s.startsWith("```")) {
-            s = s.replaceFirst("^```(?:json)?\\s*", "");
-            s = s.replaceFirst("\\s*```$", "");
+    private String mergeLines(String a, String b) {
+        Set<String> seen = new LinkedHashSet<>();
+        List<String> out = new ArrayList<>();
+        for (String src : new String[]{a,b}) {
+            if (src == null) continue;
+            for (String line : src.split("\\r?\\n")) {
+                String t = line.trim().replaceAll("\\s+", " ");
+                if (t.isEmpty()) continue;
+                String key = normalize(t);
+                if (key.length() < 2 || seen.contains(key)) continue;
+                seen.add(key); out.add(t);
+            }
         }
-        int a = s.indexOf('{');
-        int b = s.lastIndexOf('}');
-        if (a < 0 || b <= a) throw new Exception("Model returned non-JSON content");
-        return new JSONObject(s.substring(a, b + 1));
+        return String.join("\n", out);
     }
 
-    private String encodeImage(File f) throws Exception {
-        Bitmap src = BitmapFactory.decodeFile(f.getAbsolutePath());
-        if (src == null) throw new Exception("Could not read " + f.getName());
-        int w = src.getWidth(), h = src.getHeight();
-        int max = 1800;
-        Bitmap use = src;
-        if (Math.max(w, h) > max) {
-            float scale = max / (float)Math.max(w, h);
-            use = Bitmap.createScaledBitmap(src, Math.round(w * scale), Math.round(h * scale), true);
+    private String cleanupDocument(String s) {
+        if (s == null) return "";
+        StringBuilder out = new StringBuilder();
+        Set<String> seen = new LinkedHashSet<>();
+        for (String line : s.split("\\r?\\n")) {
+            String t = line.trim().replaceAll("[ \\t]+", " ");
+            if (t.isEmpty()) continue;
+            String key = normalize(t);
+            if (key.length() < 2 || seen.contains(key)) continue;
+            seen.add(key); out.append(t).append('\n');
         }
-        ByteArrayOutputStream bos = new ByteArrayOutputStream();
-        use.compress(Bitmap.CompressFormat.JPEG, 82, bos);
-        if (use != src) use.recycle();
-        src.recycle();
-        return Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP);
+        return out.toString().trim();
     }
 
-    private HttpResponse postJson(String url, String json, String auth, String apiKeyHeader) throws Exception {
-        HttpURLConnection c = (HttpURLConnection)new URL(url).openConnection();
-        c.setConnectTimeout(30000);
-        c.setReadTimeout(90000);
-        c.setRequestMethod("POST");
-        c.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-        c.setRequestProperty("Accept", "application/json");
-        if (auth != null) c.setRequestProperty("Authorization", auth);
-        if (apiKeyHeader != null) c.setRequestProperty("x-goog-api-key", apiKeyHeader);
-        c.setDoOutput(true);
-        try (OutputStream os = c.getOutputStream()) {
-            os.write(json.getBytes(StandardCharsets.UTF_8));
+    private String extractLetterNo(String text) {
+        String one = text.replace('\n',' ');
+        String[] patterns = {
+                "(?i)(?:letter|ref(?:erence)?|memo|office\\s*order|dispatch)\\s*(?:no\\.?|number|#|:)\\s*[:\\-]?\\s*([A-Z0-9./()_-]{3,45})",
+                "(?:पत्रांक|पत्र\\s*संख्या|संदर्भ\\s*संख्या|क्रमांक|ज्ञापांक)\\s*[:\\-]?\\s*([A-Za-z0-9०-९./()_-]{3,45})"
+        };
+        for (String p : patterns) {
+            Matcher m = Pattern.compile(p).matcher(one);
+            if (m.find()) return cleanValue(m.group(1));
         }
-        int code = c.getResponseCode();
-        long retry = parseRetry(c.getHeaderField("Retry-After"));
-        InputStream is = code >= 200 && code < 400 ? c.getInputStream() : c.getErrorStream();
-        String body = readAll(is);
-        c.disconnect();
-        return new HttpResponse(code, body, retry);
+        return "";
     }
 
-    private long parseRetry(String s) {
-        try { return s == null ? 0 : Long.parseLong(s.trim()); } catch (Exception e) { return 0; }
+    private String extractLetterDate(String text) {
+        for (String line : lines(text)) {
+            if (containsAny(line.toLowerCase(Locale.ROOT), "date", "dated", "दिनांक", "दिनाँक")) {
+                String d = firstDate(line);
+                if (!d.isEmpty()) return d;
+            }
+        }
+        for (String line : lines(text)) {
+            String d = firstDate(line);
+            if (!d.isEmpty()) return d;
+        }
+        return "";
     }
 
-    private String readAll(InputStream is) throws Exception {
-        if (is == null) return "";
-        BufferedReader br = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8));
-        StringBuilder sb = new StringBuilder();
-        String line;
-        while ((line = br.readLine()) != null) sb.append(line).append('\n');
-        return sb.toString();
+    private String firstDate(String s) {
+        String month = "Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?";
+        String[] ps = {
+                "\\b(\\d{1,2}[./-]\\d{1,2}[./-]\\d{2,4})\\b",
+                "\\b(\\d{1,2}\\s+(?:"+month+")\\s+\\d{2,4})\\b",
+                "\\b((?:"+month+")\\s+\\d{1,2},?\\s+\\d{2,4})\\b"
+        };
+        for (String p: ps) { Matcher m=Pattern.compile(p, Pattern.CASE_INSENSITIVE).matcher(s); if(m.find()) return m.group(1).trim(); }
+        return "";
     }
 
-    private String compactError(String body) {
-        if (body == null) return "HTTP error";
-        String s = body.replaceAll("\\s+", " ").trim();
-        return s.length() > 220 ? s.substring(0, 220) + "…" : s;
+    private String extractSender(String text) {
+        List<String> ls = lines(text);
+        Pattern labelled = Pattern.compile("(?i)^(?:from|sender|प्रेषक|सेवा में)\\s*[:\\-]?\\s*(.+)$");
+        for (String l: ls) {
+            Matcher m=labelled.matcher(l.trim());
+            if(m.find() && m.group(1).trim().length()>3) return trimTo(m.group(1).trim(), 120);
+        }
+        int limit = Math.min(ls.size(), 18);
+        String best=""; int bestScore=-999;
+        for(int i=0;i<limit;i++) {
+            String l=ls.get(i).trim();
+            if(l.length()<4 || l.length()>150) continue;
+            String low=l.toLowerCase(Locale.ROOT);
+            if(isMetadataLine(low) || isSalutation(low)) continue;
+            int score = 20-i;
+            if(containsAny(low,"bank","office","department","division","ministry","authority","corporation","limited","ltd","branch","university","government","govt","nagar","bhawan","बैंक","कार्यालय","विभाग","शाखा","मंत्रालय","निगम","प्राधिकरण")) score+=30;
+            if(l.matches(".*[A-Za-zअ-ह].*")) score+=8;
+            if(score>bestScore){bestScore=score;best=l;}
+        }
+        return trimTo(best,120);
     }
+
+    private String extractExplicitSubject(String text) {
+        List<String> ls = lines(text);
+        Pattern p = Pattern.compile("(?i)^(?:subject|sub\\.?|regarding|re|विषय|विषयक)\\s*[:\\-–]?\\s*(.*)$");
+        for(int i=0;i<ls.size();i++) {
+            Matcher m=p.matcher(ls.get(i).trim());
+            if(m.find()) {
+                String s=m.group(1).trim();
+                if(s.length()<4 && i+1<ls.size()) s=ls.get(i+1).trim();
+                s=cleanSubject(s);
+                if(s.length()>=4) return trimTo(s,180);
+            }
+        }
+        return "";
+    }
+
+    private String synthesizeSubject(String text) {
+        List<String> ls=lines(text);
+        String best=""; int bestScore=-999;
+        for(int i=0;i<ls.size();i++) {
+            String l=ls.get(i).trim();
+            if(l.length()<18 || l.length()>260) continue;
+            String low=l.toLowerCase(Locale.ROOT);
+            if(isMetadataLine(low) || isSalutation(low) || isClosing(low)) continue;
+            int score=0;
+            if(i>1 && i<Math.max(8,ls.size()*2/3)) score+=6;
+            if(containsAny(low,"request","approval","sanction","complaint","grievance","payment","claim","loan","account","branch","audit","inspection","recovery","appointment","transfer","promotion","pension","insurance","regarding","information","submission","proposal","renewal","permission","अनुरोध","स्वीकृति","अनुमोदन","शिकायत","भुगतान","ऋण","खाता","शाखा","लेखा","निरीक्षण","वसूली","स्थानांतरण","पदोन्नति","पेंशन","बीमा","सूचना","प्रस्ताव","नवीनीकरण","अनुमति")) score+=25;
+            if(l.matches(".*[.!?।]$")) score+=4;
+            score += Math.min(12, l.split("\\s+").length/2);
+            if(low.contains("http") || low.contains("www.") || low.contains("@")) score-=30;
+            if(score>bestScore){bestScore=score;best=l;}
+        }
+        if(best.isEmpty()) {
+            for(String l:ls) if(l.length()>=12 && !isMetadataLine(l.toLowerCase(Locale.ROOT))) {best=l;break;}
+        }
+        best=cleanSubject(best);
+        if(best.isEmpty()) return "";
+        String low=best.toLowerCase(Locale.ROOT);
+        boolean hindi = devanagariRatio(best) > .20;
+        if(hindi) {
+            best=best.replaceFirst("^(महोदय|महोदया)[,,:\\- ]*","")
+                    .replaceFirst("^(निवेदन है कि|अवगत कराना है कि|कृपया)[,,:\\- ]*","");
+            if(best.length()>0 && !containsAny(best,"संबंध","विषय","अनुरोध","सूचना","प्रस्ताव","शिकायत")) best = "संबंधित पत्राचार: " + best;
+        } else {
+            best=best.replaceFirst("(?i)^(dear sir/?madam|sir|madam)[,,:\\- ]*","")
+                    .replaceFirst("(?i)^(this is to inform you that|we wish to inform you that|it is submitted that|please note that)\\s*","");
+            if(!containsAny(low,"regarding","request","application","proposal","complaint","approval","submission","information")) best="Regarding " + best;
+        }
+        return trimTo(best.replaceAll("\\s+"," ").trim(), 180);
+    }
+
+    private String extractDepartment(String corpus) {
+        Map<String,List<String>> map = departmentCatalog();
+        List<String> ls=lines(corpus);
+        String best=""; double bestScore=0;
+        for(Map.Entry<String,List<String>> e:map.entrySet()) {
+            for(String alias:e.getValue()) {
+                String a=normalize(alias);
+                if(a.length()<2) continue;
+                for(String line:ls) {
+                    String n=normalize(line);
+                    if(n.isEmpty()) continue;
+                    double score=0;
+                    if(n.contains(a)) score=1.0;
+                    else if(line.length()<=55 || a.length()<=12) {
+                        String compact=n.replace(" ","");
+                        String acomp=a.replace(" ","");
+                        if(compact.length()>=3 && acomp.length()>=3) score=similarity(compact,acomp);
+                    }
+                    if(score>bestScore && score>=0.72) { bestScore=score; best=e.getKey(); }
+                }
+            }
+        }
+        return best;
+    }
+
+    private Map<String,List<String>> departmentCatalog() {
+        Map<String,List<String>> m=new LinkedHashMap<>();
+        add(m,"HRM", "hrm","human resource","human resources","personnel","staff","कार्मिक","मानव संसाधन","स्थापना");
+        add(m,"Credit", "credit","loans","loan department","advance","advances","ऋण","अग्रिम","क्रेडिट");
+        add(m,"Recovery", "recovery","recovery department","npa recovery","वसूली","ऋण वसूली");
+        add(m,"Complaint / Grievance", "complaint","grievance","customer grievance","शिकायत","शिकायत निवारण","जन शिकायत");
+        add(m,"IT", "it","information technology","computer","technology","सूचना प्रौद्योगिकी","आईटी");
+        add(m,"Audit", "audit","internal audit","concurrent audit","लेखा परीक्षा","अंकेक्षण","ऑडिट");
+        add(m,"Inspection", "inspection","inspection department","निरीक्षण");
+        add(m,"Risk", "risk","risk management","जोखिम","जोखिम प्रबंधन");
+        add(m,"Planning & Development", "planning","development","planning and development","योजना","विकास","योजना एवं विकास");
+        add(m,"Financial Inclusion", "financial inclusion","fi department","financial literacy","वित्तीय समावेशन");
+        add(m,"General Administration", "general administration","gad","administration","प्रशासन","सामान्य प्रशासन");
+        add(m,"Premises", "premises","estate","building","परिसर","भवन");
+        add(m,"Law / Legal", "law","legal","legal department","विधि","कानूनी","विधिक");
+        add(m,"Vigilance", "vigilance","सतर्कता");
+        add(m,"Accounts", "accounts","accounting","finance and accounts","लेखा","लेखा विभाग");
+        add(m,"Treasury / Investment", "treasury","investment","fund management","कोष","निवेश");
+        add(m,"Agriculture", "agriculture","agri","कृषि");
+        add(m,"MSME", "msme","micro small medium","सूक्ष्म लघु मध्यम");
+        add(m,"Retail Banking", "retail banking","retail","खुदरा बैंकिंग");
+        add(m,"Marketing", "marketing","business development","विपणन","व्यवसाय विकास");
+        add(m,"Operations", "operations","banking operations","परिचालन","संचालन");
+        add(m,"Security", "security","security department","सुरक्षा");
+        add(m,"Pension", "pension","पेंशन");
+        add(m,"Insurance", "insurance","बीमा");
+        add(m,"Training", "training","learning and development","प्रशिक्षण");
+        add(m,"Chairman's Secretariat", "chairman secretariat","chairman's secretariat","cmd secretariat","chairman office","अध्यक्ष सचिवालय","अध्यक्ष कार्यालय");
+
+        SharedPreferences sp=context.getSharedPreferences("local_ai",Context.MODE_PRIVATE);
+        String custom=sp.getString("custom_departments","");
+        for(String row:custom.split("\\r?\\n")) {
+            String r=row.trim(); if(r.isEmpty()) continue;
+            String[] sides=r.split("=",2);
+            String canonical=sides[0].trim(); if(canonical.isEmpty()) continue;
+            List<String> aliases=new ArrayList<>(); aliases.add(canonical);
+            if(sides.length>1) for(String a:sides[1].split(",")) if(!a.trim().isEmpty()) aliases.add(a.trim());
+            m.put(canonical,aliases);
+        }
+        return m;
+    }
+
+    private void add(Map<String,List<String>> m,String canonical,String...aliases){m.put(canonical,new ArrayList<>(Arrays.asList(aliases)));}
+
+    private List<String> lines(String text){
+        List<String> l=new ArrayList<>(); if(text==null)return l;
+        for(String s:text.split("\\r?\\n")){String t=s.trim().replaceAll("\\s+"," ");if(!t.isEmpty())l.add(t);}return l;
+    }
+    private boolean isMetadataLine(String low){return containsAny(low,"letter no","ref no","reference no","date:","dated:","phone","mobile","email","website","www.","पत्रांक","दिनांक","दूरभाष","ईमेल");}
+    private boolean isSalutation(String low){return low.matches(".*\\b(dear|sir|madam|respected|महोदय|महोदया|सेवा में)\\b.*") && low.length()<70;}
+    private boolean isClosing(String low){return containsAny(low,"yours faithfully","yours sincerely","regards","thank you","भवदीय","सधन्यवाद");}
+    private boolean containsAny(String s,String...keys){for(String k:keys)if(s.contains(k))return true;return false;}
+    private String cleanValue(String s){return s==null?"":s.replaceAll("^[\\s:;,-]+|[\\s:;,-]+$","").trim();}
+    private String cleanSubject(String s){if(s==null)return"";return s.replaceAll("^[\\s:;,-]+|[\\s:;,-]+$","").replaceAll("\\s+"," ").trim();}
+    private String normalize(String s){if(s==null)return"";return s.toLowerCase(Locale.ROOT).replace('।',' ').replaceAll("[^a-z0-9\\u0900-\\u097F]+"," ").replaceAll("\\s+"," ").trim();}
+    private String trimTo(String s,int n){if(s==null)return"";s=s.trim();return s.length()<=n?s:s.substring(0,n).trim()+"…";}
+    private double devanagariRatio(String s){int d=0,l=0;for(char c:s.toCharArray()){if(Character.isLetter(c)){l++;if(c>=0x0900&&c<=0x097F)d++;}}return l==0?0:(double)d/l;}
+    private double similarity(String a,String b){int max=Math.max(a.length(),b.length());if(max==0)return 1;return 1.0-(double)lev(a,b)/max;}
+    private int lev(String a,String b){int[] prev=new int[b.length()+1],cur=new int[b.length()+1];for(int j=0;j<=b.length();j++)prev[j]=j;for(int i=1;i<=a.length();i++){cur[0]=i;for(int j=1;j<=b.length();j++){int c=a.charAt(i-1)==b.charAt(j-1)?0:1;cur[j]=Math.min(Math.min(cur[j-1]+1,prev[j]+1),prev[j-1]+c);}int[]t=prev;prev=cur;cur=t;}return prev[b.length()];}
 
     private void success(Callback cb, JSONObject data, String provider) {
-        android.os.Handler h = new android.os.Handler(context.getMainLooper());
-        h.post(() -> cb.onSuccess(data, provider));
+        new android.os.Handler(context.getMainLooper()).post(() -> cb.onSuccess(data, provider));
     }
-
     private void fail(Callback cb, String msg) {
-        android.os.Handler h = new android.os.Handler(context.getMainLooper());
-        h.post(() -> cb.onFailure(msg));
-    }
-
-    private static class HttpResponse {
-        final int code; final String body; final long retryAfter;
-        HttpResponse(int c, String b, long r) { code = c; body = b; retryAfter = r; }
-    }
-    private static class ApiException extends Exception {
-        final int code; final long retryAfterSeconds;
-        ApiException(int code, long retry, String message) { super("HTTP " + code + ": " + message); this.code = code; this.retryAfterSeconds = retry; }
+        new android.os.Handler(context.getMainLooper()).post(() -> cb.onFailure(msg));
     }
 }
