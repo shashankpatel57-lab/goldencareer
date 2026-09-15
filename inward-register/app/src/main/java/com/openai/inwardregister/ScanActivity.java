@@ -32,7 +32,6 @@ import org.json.JSONObject;
 
 import java.io.File;
 import java.util.ArrayList;
-import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.regex.Matcher;
@@ -60,22 +59,22 @@ public class ScanActivity extends Activity {
     private void render() {
         ScrollView sc = new ScrollView(this);
         sc.setFillViewport(true);
-        sc.setBackgroundColor(Color.rgb(247,249,252));
+        sc.setClipToPadding(false);
+        sc.setBackgroundColor(Ui.BG);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(Ui.dp(this,18), Ui.dp(this,18), Ui.dp(this,18), Ui.dp(this,28));
+        root.setPadding(Ui.dp(this,20), Ui.dp(this,22), Ui.dp(this,20), Ui.dp(this,34));
         sc.addView(root, new ScrollView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        TextView step = Ui.body(this, "NEW LETTER  •  INWARD #" + store.nextInwardNo());
-        step.setTextColor(Color.rgb(11,87,208));
-        step.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
-        root.addView(step);
-        root.addView(Ui.title(this, "Scan incoming mail", 27));
-        root.addView(Ui.body(this, "First capture the envelope/tracking label. Then photograph every page belonging to this one letter."));
+        root.addView(Ui.badge(this, "LOCAL AI • NO INTERNET • INWARD #" + store.nextInwardNo()));
+        root.addView(Ui.title(this, "Scan incoming mail", 29));
+        TextView intro = Ui.body(this, "A guided two-step capture. Tracking is read locally, then every letter page is analyzed on-device in English and Hindi.");
+        intro.setPadding(0,0,0,Ui.dp(this,14));
+        root.addView(intro);
 
         trackingSection = Ui.card(this);
-        trackingSection.addView(Ui.title(this, "1  •  Tracking / Envelope", 19));
-        trackingSection.addView(Ui.body(this, "Scanning is processed locally on the phone using barcode recognition and OCR, so this step does not consume an AI API call."));
+        trackingSection.addView(Ui.title(this, "1  Tracking / Envelope", 19));
+        trackingSection.addView(Ui.body(this, "Point the camera at the barcode, Speed Post label or tracking text. Nothing is uploaded."));
         Button scanTracking = Ui.primary(this, "Scan Tracking Number");
         scanTracking.setOnClickListener(v -> openCamera(REQ_TRACK));
         trackingSection.addView(scanTracking);
@@ -83,12 +82,13 @@ public class ScanActivity extends Activity {
         Button byHand = Ui.secondary(this, "No Envelope — Mark as “By Hand”");
         byHand.setOnClickListener(v -> {
             trackingField.setText("By Hand");
-            trackingStatus.setText("Marked as hand-delivered. You can continue to letter pages.");
+            trackingStatus.setText("✓ Marked as hand-delivered");
+            trackingStatus.setTextColor(Ui.GREEN);
             updateContinue();
         });
         trackingSection.addView(byHand);
 
-        trackingSection.addView(Ui.label(this, "TRACKING ID — REVIEW / CORRECT IF NEEDED"));
+        trackingSection.addView(Ui.label(this, "TRACKING ID — VERIFY / EDIT"));
         trackingField = Ui.input(this, "Tracking ID");
         trackingField.setOnEditorActionListener((v,a,e) -> { updateContinue(); return false; });
         trackingField.setOnFocusChangeListener((v,has) -> { if (!has) updateContinue(); });
@@ -96,7 +96,7 @@ public class ScanActivity extends Activity {
         trackingStatus = Ui.body(this, "Not scanned yet.");
         trackingStatus.setPadding(0,0,0,Ui.dp(this,5));
         trackingSection.addView(trackingStatus);
-        continueButton = Ui.primary(this, "Continue to Letter Pages");
+        continueButton = Ui.primary(this, "Continue to Letter Pages  →");
         continueButton.setEnabled(false); continueButton.setAlpha(.45f);
         continueButton.setOnClickListener(v -> showPagesStep());
         trackingSection.addView(continueButton);
@@ -104,9 +104,9 @@ public class ScanActivity extends Activity {
 
         pagesSection = Ui.card(this);
         pagesSection.setVisibility(View.GONE);
-        pagesSection.addView(Ui.title(this, "2  •  Capture Letter Pages", 19));
-        pagesSection.addView(Ui.body(this, "Capture page 1, page 2, page 3… in order. Use “Remove Last Page” if a photo is blurred or belongs to the wrong letter."));
-        Button capturePage = Ui.primary(this, "Capture Next Page");
+        pagesSection.addView(Ui.title(this, "2  Capture Letter Pages", 19));
+        pagesSection.addView(Ui.body(this, "Keep the page flat and fill the frame. Capture every page in order. The local engine runs multiple OCR passes, including a high-contrast pass for handwritten routing notes."));
+        Button capturePage = Ui.primary(this, "＋ Capture Next Page");
         capturePage.setOnClickListener(v -> openCamera(REQ_PAGE));
         pagesSection.addView(capturePage);
         Button remove = Ui.secondary(this, "Remove Last Page");
@@ -114,8 +114,9 @@ public class ScanActivity extends Activity {
         pagesSection.addView(remove);
         pagesStatus = Ui.body(this, "0 pages captured");
         pagesStatus.setTextSize(16);
+        pagesStatus.setPadding(0,Ui.dp(this,4),0,Ui.dp(this,4));
         pagesSection.addView(pagesStatus);
-        doneButton = Ui.primary(this, "Done Scanning This Letter → Process with AI");
+        doneButton = Ui.primary(this, "Analyze This Letter Offline");
         doneButton.setEnabled(false); doneButton.setAlpha(.45f);
         doneButton.setOnClickListener(v -> processLetter());
         pagesSection.addView(doneButton);
@@ -124,6 +125,8 @@ public class ScanActivity extends Activity {
         Button cancel = Ui.danger(this, "Cancel This Letter");
         cancel.setOnClickListener(v -> finish());
         root.addView(cancel);
+
+        Ui.prepareScreen(this, sc);
         setContentView(sc);
     }
 
@@ -181,7 +184,7 @@ public class ScanActivity extends Activity {
                             if (raw != null && raw.trim().length() >= 6) { best = raw.trim(); break; }
                         }
                         scanner.close();
-                        if (!best.isEmpty()) applyTracking(best, "Barcode detected locally");
+                        if (!best.isEmpty()) applyTracking(best, "✓ Barcode detected locally");
                         else runTextOcr(image);
                     })
                     .addOnFailureListener(e -> { scanner.close(); runTextOcr(image); });
@@ -196,9 +199,9 @@ public class ScanActivity extends Activity {
                 .addOnSuccessListener(result -> {
                     String candidate = extractTrackingCandidate(result.getText());
                     rec.close();
-                    if (!candidate.isEmpty()) applyTracking(candidate, "Tracking text detected locally");
+                    if (!candidate.isEmpty()) applyTracking(candidate, "✓ Tracking text detected locally");
                     else {
-                        trackingStatus.setText("No confident tracking number found. Type it manually, or rescan the envelope.");
+                        trackingStatus.setText("No confident tracking number found. Type it manually, or rescan.");
                         trackingField.requestFocus();
                     }
                 })
@@ -210,7 +213,8 @@ public class ScanActivity extends Activity {
 
     private void applyTracking(String value, String message) {
         trackingField.setText(value);
-        trackingStatus.setText(message + ". Please verify it before continuing.");
+        trackingStatus.setText(message + ". Please verify before continuing.");
+        trackingStatus.setTextColor(Ui.GREEN);
         updateContinue();
     }
 
@@ -220,17 +224,15 @@ public class ScanActivity extends Activity {
         Pattern india = Pattern.compile("\\b[A-Z]{2}\\d{9}IN\\b");
         Matcher m = india.matcher(upper.replace(" ", ""));
         if (m.find()) return m.group();
-
         Pattern labelled = Pattern.compile("(?i)(?:TRACK(?:ING)?|CONSIGNMENT|AWB|ARTICLE|DOCKET|SPEED\\s*POST|REFERENCE)\\s*(?:NO|NUMBER|ID|#|:|-)*\\s*([A-Z0-9][A-Z0-9\\-]{7,29})");
         m = labelled.matcher(text.replaceAll("\\s+", " "));
         if (m.find()) return m.group(1).trim();
-
         Pattern generic = Pattern.compile("\\b(?=[A-Z0-9-]{9,25}\\b)(?=[A-Z0-9-]*\\d)[A-Z0-9-]{9,25}\\b");
         m = generic.matcher(upper);
         String best = "";
         while (m.find()) {
             String c = m.group().replace("-", "");
-            if (c.matches("\\d{10,14}")) continue; // usually phone / timestamp
+            if (c.matches("\\d{10,14}")) continue;
             if (c.length() > best.length()) best = m.group();
         }
         return best;
@@ -245,7 +247,8 @@ public class ScanActivity extends Activity {
 
     private void updatePages() {
         int n = pages.size();
-        pagesStatus.setText(n + (n == 1 ? " page captured" : " pages captured"));
+        pagesStatus.setText("✓ " + n + (n == 1 ? " page captured" : " pages captured"));
+        pagesStatus.setTextColor(n > 0 ? Ui.GREEN : Ui.MUTED);
         doneButton.setEnabled(n > 0); doneButton.setAlpha(n > 0 ? 1f : .45f);
     }
 
@@ -253,8 +256,8 @@ public class ScanActivity extends Activity {
         if (pages.isEmpty()) return;
         String tracking = trackingField.getText().toString().trim();
         ProgressDialog pd = new ProgressDialog(this);
-        pd.setTitle("Reading Letter");
-        pd.setMessage("AI is reading all captured pages and checking handwritten routing/department notes…");
+        pd.setTitle("Local Inward AI");
+        pd.setMessage("Reading English + Hindi text, enhancing handwriting, identifying routing department and building the subject…\n\nAll processing stays on this phone.");
         pd.setIndeterminate(true); pd.setCancelable(false); pd.show();
 
         AiClient ai = new AiClient(this);
@@ -265,7 +268,7 @@ public class ScanActivity extends Activity {
             }
             @Override public void onFailure(String message) {
                 if (!isFinishing()) pd.dismiss();
-                openReview(tracking, new JSONObject(), "Manual Review", message);
+                openReview(tracking, new JSONObject(), "Local AI • Manual Review", message);
             }
         });
     }
