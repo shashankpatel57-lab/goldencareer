@@ -101,6 +101,7 @@ public class AiClient {
         JSONObject body = new JSONObject();
         body.put("model", settings.grokModel());
         body.put("temperature", 0.1);
+        body.put("response_format", grokResponseFormat());
         JSONArray messages = new JSONArray();
         JSONObject msg = new JSONObject();
         msg.put("role", "user");
@@ -137,9 +138,9 @@ public class AiClient {
         for (String b64 : images) {
             JSONObject p = new JSONObject();
             JSONObject inline = new JSONObject();
-            inline.put("mime_type", "image/jpeg");
+            inline.put("mimeType", "image/jpeg");
             inline.put("data", b64);
-            p.put("inline_data", inline);
+            p.put("inlineData", inline);
             parts.put(p);
         }
         JSONObject pt = new JSONObject();
@@ -151,6 +152,7 @@ public class AiClient {
         JSONObject cfg = new JSONObject();
         cfg.put("temperature", 0.1);
         cfg.put("responseMimeType", "application/json");
+        cfg.put("responseJsonSchema", letterSchema());
         body.put("generationConfig", cfg);
 
         String model = settings.geminiModel();
@@ -161,6 +163,35 @@ public class AiClient {
         String txt = root.getJSONArray("candidates").getJSONObject(0)
                 .getJSONObject("content").getJSONArray("parts").getJSONObject(0).optString("text", "");
         return parseJsonObject(txt);
+    }
+
+    private JSONObject letterSchema() throws Exception {
+        JSONObject schema = new JSONObject();
+        schema.put("type", "object");
+        JSONObject props = new JSONObject();
+        String[] fields = {"Letter_No", "Letter_Date", "Sender", "Subject", "Department"};
+        JSONArray required = new JSONArray();
+        for (String f : fields) {
+            JSONObject v = new JSONObject();
+            v.put("type", "string");
+            props.put(f, v);
+            required.put(f);
+        }
+        schema.put("properties", props);
+        schema.put("required", required);
+        schema.put("additionalProperties", false);
+        return schema;
+    }
+
+    private JSONObject grokResponseFormat() throws Exception {
+        JSONObject root = new JSONObject();
+        root.put("type", "json_schema");
+        JSONObject js = new JSONObject();
+        js.put("name", "inward_letter_fields");
+        js.put("schema", letterSchema());
+        js.put("strict", true);
+        root.put("json_schema", js);
+        return root;
     }
 
     private String prompt() {
