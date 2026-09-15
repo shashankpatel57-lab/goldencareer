@@ -1,10 +1,10 @@
 package com.openai.inwardregister;
 
 import android.app.Activity;
-import android.app.AlertDialog;
+import android.content.Context;
+import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.os.Bundle;
-import android.text.InputType;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
@@ -14,139 +14,73 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 public class SettingsActivity extends Activity {
-    private AdminSettings settings;
-    private EditText grokModel, geminiModel, grokKeys, geminiKeys;
+    private SharedPreferences prefs;
+    private EditText customDepartments;
 
     @Override public void onCreate(Bundle b) {
         super.onCreate(b);
-        settings = new AdminSettings(this);
-        if (settings.hasPin()) askPin(); else createPinDialog();
-    }
-
-    private void askPin() {
-        EditText pin = pinInput("Admin PIN");
-        AlertDialog d = new AlertDialog.Builder(this)
-                .setTitle("Admin Login")
-                .setMessage("Enter the PIN to manage AI providers and API keys.")
-                .setView(pin)
-                .setNegativeButton("Cancel", (x,w) -> finish())
-                .setPositiveButton("Unlock", null)
-                .create();
-        d.setOnShowListener(x -> d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            if (settings.verifyPin(pin.getText().toString())) { d.dismiss(); render(); }
-            else { pin.setError("Incorrect PIN"); pin.requestFocus(); }
-        }));
-        d.setCanceledOnTouchOutside(false);
-        d.show();
-    }
-
-    private void createPinDialog() {
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(Ui.dp(this,22), 0, Ui.dp(this,22), 0);
-        EditText p1 = pinInput("Create PIN (4–12 digits)");
-        EditText p2 = pinInput("Confirm PIN");
-        box.addView(p1); box.addView(p2);
-        AlertDialog d = new AlertDialog.Builder(this)
-                .setTitle("Create Admin PIN")
-                .setMessage("This PIN protects the AI settings screen on this phone.")
-                .setView(box)
-                .setNegativeButton("Cancel", (x,w) -> finish())
-                .setPositiveButton("Create", null)
-                .create();
-        d.setOnShowListener(x -> d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            String a = p1.getText().toString(), b = p2.getText().toString();
-            if (!a.matches("\\d{4,12}")) { p1.setError("Use 4–12 digits"); return; }
-            if (!a.equals(b)) { p2.setError("PINs do not match"); return; }
-            settings.setPin(a); d.dismiss(); render();
-        }));
-        d.setCanceledOnTouchOutside(false);
-        d.show();
-    }
-
-    private EditText pinInput(String hint) {
-        EditText e = Ui.input(this, hint);
-        e.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
-        return e;
+        prefs = getSharedPreferences("local_ai", Context.MODE_PRIVATE);
+        render();
     }
 
     private void render() {
         ScrollView sc = new ScrollView(this);
         sc.setFillViewport(true);
-        sc.setBackgroundColor(Color.rgb(247,249,252));
+        sc.setClipToPadding(false);
+        sc.setBackgroundColor(Ui.BG);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(Ui.dp(this,18), Ui.dp(this,18), Ui.dp(this,18), Ui.dp(this,28));
+        root.setPadding(Ui.dp(this,20), Ui.dp(this,22), Ui.dp(this,20), Ui.dp(this,38));
         sc.addView(root, new ScrollView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        TextView badge = Ui.body(this, "ADMIN • SECURED ON DEVICE");
-        badge.setTextColor(Color.rgb(11,87,208));
-        badge.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
-        root.addView(badge);
-        root.addView(Ui.title(this, "AI Provider Settings", 27));
-        root.addView(Ui.body(this, "Grok is attempted first. If all currently available Grok keys fail, the app falls back to Gemini. Keys are encrypted with Android Keystore. A key receiving HTTP 429 is paused using Retry-After (or a short cooldown) rather than repeatedly hammering the provider."));
+        root.addView(Ui.badge(this, "LOCAL AI ENGINE • ZERO API KEYS"));
+        root.addView(Ui.title(this, "Document Intelligence", 29));
+        TextView intro = Ui.body(this, "The engine runs entirely on this phone. It uses separate English and Devanagari OCR models, a second high-contrast handwriting pass, fuzzy department matching and local subject synthesis.");
+        intro.setPadding(0,0,0,Ui.dp(this,14));
+        root.addView(intro);
 
-        LinearLayout grok = Ui.card(this);
-        grok.addView(Ui.title(this, "Primary • Grok Vision", 19));
-        grok.addView(Ui.label(this, "MODEL"));
-        grokModel = Ui.input(this, "grok-4.6");
-        grokModel.setText(settings.grokModel()); grok.addView(grokModel);
-        grok.addView(Ui.label(this, "API KEYS — ONE PER LINE"));
-        grokKeys = Ui.multilineInput(this, "xAI API key 1\nxAI API key 2", 5);
-        grokKeys.setText(settings.getGrokKeysRaw()); grok.addView(grokKeys);
-        grok.addView(Ui.body(this, "Round-robin selection distributes normal requests across your configured authorized keys. Invalid or rate-limited keys are temporarily skipped."));
-        root.addView(grok);
+        LinearLayout status = Ui.successCard(this);
+        status.addView(Ui.title(this, "Engine ready", 19));
+        TextView ready = Ui.body(this, "✓ English OCR bundled\n✓ Hindi / Devanagari OCR bundled\n✓ Handwriting-focused contrast pass\n✓ Local department classifier\n✓ Local subject generator\n✓ No Internet permission in this APK");
+        ready.setTextColor(Ui.GREEN);
+        ready.setLineSpacing(Ui.dp(this,2),1.18f);
+        status.addView(ready);
+        root.addView(status);
 
-        LinearLayout gem = Ui.card(this);
-        gem.addView(Ui.title(this, "Fallback • Google Gemini Vision", 19));
-        gem.addView(Ui.label(this, "MODEL"));
-        geminiModel = Ui.input(this, "gemini-3.8-flash");
-        geminiModel.setText(settings.geminiModel()); gem.addView(geminiModel);
-        gem.addView(Ui.label(this, "API KEYS — ONE PER LINE"));
-        geminiKeys = Ui.multilineInput(this, "Gemini API key 1\nGemini API key 2", 5);
-        geminiKeys.setText(settings.getGeminiKeysRaw()); gem.addView(geminiKeys);
-        root.addView(gem);
+        LinearLayout tips = Ui.card(this);
+        tips.addView(Ui.title(this, "For best handwriting recognition", 18));
+        tips.addView(Ui.body(this, "• Keep the page flat and parallel to the camera.\n• Avoid shadows across blue/black pen notes.\n• Fill most of the frame with the page.\n• If a routing note is very small, move closer and capture a sharper page photo.\n• Always verify Department on the review screen."));
+        root.addView(tips);
 
-        Button save = Ui.primary(this, "Save AI Settings");
+        LinearLayout custom = Ui.card(this);
+        custom.addView(Ui.title(this, "Custom Department Dictionary", 18));
+        custom.addView(Ui.body(this, "The app already knows common banking departments. Add your bank-specific departments or handwritten aliases below. One department per line. Optional aliases can follow '=' separated by commas."));
+        custom.addView(Ui.label(this, "FORMAT EXAMPLES"));
+        TextView ex = Ui.body(this, "HRM = HR, Personnel, कार्मिक\nChairman's Secretariat = CS, Chairman Office, अध्यक्ष सचिवालय");
+        ex.setTextColor(Ui.BLUE_DARK);
+        custom.addView(ex);
+        custom.addView(Ui.label(this, "YOUR CUSTOM ENTRIES"));
+        customDepartments = Ui.multilineInput(this, "Department = alias 1, alias 2, हिंदी नाम", 8);
+        customDepartments.setText(prefs.getString("custom_departments", ""));
+        custom.addView(customDepartments);
+        Button save = Ui.primary(this, "Save Department Dictionary");
         save.setOnClickListener(v -> {
-            settings.setModels(grokModel.getText().toString(), geminiModel.getText().toString());
-            settings.setGrokKeys(grokKeys.getText().toString());
-            settings.setGeminiKeys(geminiKeys.getText().toString());
-            Toast.makeText(this, "AI settings saved securely.", Toast.LENGTH_SHORT).show();
+            prefs.edit().putString("custom_departments", customDepartments.getText().toString().trim()).apply();
+            Toast.makeText(this, "Local AI department dictionary updated.", Toast.LENGTH_SHORT).show();
         });
-        root.addView(save);
+        custom.addView(save);
+        root.addView(custom);
 
-        Button changePin = Ui.secondary(this, "Change Admin PIN");
-        changePin.setOnClickListener(v -> changePinDialog());
-        root.addView(changePin);
+        LinearLayout privacy = Ui.card(this);
+        privacy.addView(Ui.title(this, "Privacy", 18));
+        privacy.addView(Ui.body(this, "This build does not request Android Internet permission. Letter photos, OCR text and register entries stay inside the app's local storage unless you explicitly share the exported Excel file."));
+        root.addView(privacy);
 
         Button done = Ui.secondary(this, "Done");
         done.setOnClickListener(v -> finish());
         root.addView(done);
-        setContentView(sc);
-    }
 
-    private void changePinDialog() {
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(Ui.dp(this,22), 0, Ui.dp(this,22), 0);
-        EditText old = pinInput("Current PIN");
-        EditText p1 = pinInput("New PIN");
-        EditText p2 = pinInput("Confirm new PIN");
-        box.addView(old); box.addView(p1); box.addView(p2);
-        AlertDialog d = new AlertDialog.Builder(this)
-                .setTitle("Change Admin PIN")
-                .setView(box)
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Change", null)
-                .create();
-        d.setOnShowListener(x -> d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            if (!settings.verifyPin(old.getText().toString())) { old.setError("Incorrect current PIN"); return; }
-            String a=p1.getText().toString(), b=p2.getText().toString();
-            if (!a.matches("\\d{4,12}")) { p1.setError("Use 4–12 digits"); return; }
-            if (!a.equals(b)) { p2.setError("PINs do not match"); return; }
-            settings.setPin(a); d.dismiss(); Toast.makeText(this, "Admin PIN changed.", Toast.LENGTH_SHORT).show();
-        }));
-        d.show();
+        Ui.prepareScreen(this, sc);
+        setContentView(sc);
     }
 }
