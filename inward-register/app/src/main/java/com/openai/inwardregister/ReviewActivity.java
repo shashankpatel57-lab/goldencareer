@@ -37,49 +37,56 @@ public class ReviewActivity extends Activity {
     private void render() {
         ScrollView sc = new ScrollView(this);
         sc.setFillViewport(true);
-        sc.setBackgroundColor(Color.rgb(247,249,252));
+        sc.setClipToPadding(false);
+        sc.setBackgroundColor(Ui.BG);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(Ui.dp(this,18), Ui.dp(this,18), Ui.dp(this,18), Ui.dp(this,28));
+        root.setPadding(Ui.dp(this,20), Ui.dp(this,22), Ui.dp(this,20), Ui.dp(this,36));
         sc.addView(root, new ScrollView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        TextView badge = Ui.body(this, editIndex >= 0 ? "EDIT CONFIRMED ENTRY" : "AI EXTRACTION COMPLETE");
-        badge.setTextColor(Color.rgb(11,87,208));
-        badge.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
-        root.addView(badge);
-        root.addView(Ui.title(this, "Review before saving", 27));
-        root.addView(Ui.body(this, "Every field remains editable. Verify letter number/date, sender, inferred subject, handwritten department note, and tracking ID before confirming."));
+        root.addView(Ui.badge(this, editIndex >= 0 ? "EDIT REGISTER ENTRY" : "LOCAL AI EXTRACTION COMPLETE"));
+        root.addView(Ui.title(this, "Review before saving", 29));
+        TextView intro = Ui.body(this, "The app has already performed local English/Hindi OCR and handwriting-focused analysis. Verify the result once; every field stays editable.");
+        intro.setPadding(0,0,0,Ui.dp(this,14));
+        root.addView(intro);
 
         String warning = getIntent().getStringExtra("warning");
         if (warning != null && !warning.trim().isEmpty()) {
             LinearLayout warn = Ui.card(this);
-            TextView wt = Ui.title(this, "AI needs manual help", 16);
-            wt.setTextColor(Color.rgb(160,90,0));
+            TextView wt = Ui.title(this, "Needs a quick manual check", 16);
+            wt.setTextColor(Color.rgb(158,91,0));
             warn.addView(wt);
             warn.addView(Ui.body(this, warning));
             root.addView(warn);
         }
 
-        LinearLayout meta = Ui.card(this);
+        LinearLayout meta = Ui.successCard(this);
         meta.addView(Ui.title(this, "Register Metadata", 18));
-        meta.addView(Ui.body(this, "Receiving Date:  " + entry.optString("Receiving_Date", store.receivingDate())));
-        meta.addView(Ui.body(this, "Inward No.:  " + entry.optInt("Inward_No", store.nextInwardNo())));
+        meta.addView(Ui.body(this, "Receiving Date   " + entry.optString("Receiving_Date", store.receivingDate())));
+        meta.addView(Ui.body(this, "Inward No.        " + entry.optInt("Inward_No", store.nextInwardNo())));
         String provider = entry.optString("AI_Provider", "");
-        if (!provider.isEmpty()) meta.addView(Ui.body(this, "Extraction:  " + provider));
+        if (!provider.isEmpty()) {
+            TextView engine = Ui.body(this, "Engine               " + provider);
+            engine.setTextColor(Ui.GREEN);
+            meta.addView(engine);
+        }
         root.addView(meta);
 
         LinearLayout form = Ui.card(this);
         form.addView(Ui.title(this, "Letter Details", 18));
+        form.addView(Ui.body(this, "Fields generated from OCR are suggestions, not locked values. Correct anything unclear before confirming."));
         letterNo = addField(form, "LETTER NO.", "Reference / letter number", entry.optString("Letter_No", ""), false);
         letterDate = addField(form, "LETTER DATE", "Date printed on letter", entry.optString("Letter_Date", ""), false);
         sender = addField(form, "SENDER", "Organization / person / office", entry.optString("Sender", ""), false);
-        subject = addField(form, "SUBJECT", "Explicit subject or concise AI summary", entry.optString("Subject", ""), true);
-        department = addField(form, "DEPARTMENT", "Handwritten/printed routing department", entry.optString("Department", ""), false);
+        subject = addField(form, "SUBJECT", "Detected subject or locally generated one-line summary", entry.optString("Subject", ""), true);
+        department = addField(form, "DEPARTMENT", "Printed / handwritten routing department", entry.optString("Department", ""), false);
         tracking = addField(form, "TRACKING ID", "Tracking number or By Hand", entry.optString("Tracking_ID", ""), false);
-        form.addView(Ui.body(this, "Signature will always remain blank in Excel for the physical inward-register signature."));
+        TextView note = Ui.body(this, "Signature stays blank in Excel so the physical inward register can be signed after printing.");
+        note.setPadding(0,Ui.dp(this,7),0,0);
+        form.addView(note);
         root.addView(form);
 
-        Button save = Ui.primary(this, editIndex >= 0 ? "Save Changes" : "Confirm & Add to Register");
+        Button save = Ui.primary(this, editIndex >= 0 ? "Save Changes" : "✓ Confirm & Add to Register");
         save.setOnClickListener(v -> save());
         root.addView(save);
 
@@ -97,6 +104,8 @@ public class ReviewActivity extends Activity {
         Button cancel = Ui.secondary(this, "Back Without Saving");
         cancel.setOnClickListener(v -> finish());
         root.addView(cancel);
+
+        Ui.prepareScreen(this, sc);
         setContentView(sc);
     }
 
