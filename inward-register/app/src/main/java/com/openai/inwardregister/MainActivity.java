@@ -4,7 +4,6 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.DatePickerDialog;
 import android.content.Intent;
-import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
 import android.text.InputType;
@@ -44,35 +43,41 @@ public class MainActivity extends Activity {
     private void render() {
         ScrollView sc = new ScrollView(this);
         sc.setFillViewport(true);
-        sc.setBackgroundColor(Color.rgb(247,249,252));
+        sc.setClipToPadding(false);
+        sc.setBackgroundColor(Ui.BG);
         root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(Ui.dp(this,18), Ui.dp(this,18), Ui.dp(this,18), Ui.dp(this,28));
+        root.setPadding(Ui.dp(this,20), Ui.dp(this,22), Ui.dp(this,20), Ui.dp(this,38));
         sc.addView(root, new ScrollView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        TextView badge = Ui.body(this, "INWARD REGISTER • AI ASSISTED");
-        badge.setTextColor(Color.rgb(11,87,208));
-        badge.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
-        root.addView(badge);
-        root.addView(Ui.title(this, "Physical Mail Digitizer", 28));
-        TextView sub = Ui.body(this, "Scan envelope tracking locally, capture all letter pages, review AI-extracted fields, and export a print-ready Excel register.");
+        root.addView(Ui.badge(this, "INWARD REGISTER • PRIVATE ON-DEVICE AI"));
+        root.addView(Ui.title(this, "MailDesk AI", 30));
+        TextView sub = Ui.body(this, "A professional inward-register assistant for physical mail. English + Hindi OCR, handwriting-focused department detection, local subject generation and Excel export — without uploading letters.");
         sub.setPadding(0,0,0,Ui.dp(this,16));
         root.addView(sub);
 
         if (!store.isActive()) renderStart(); else renderActive();
+        Ui.prepareScreen(this, sc);
         setContentView(sc);
     }
 
     private void renderStart() {
+        LinearLayout privacy = Ui.successCard(this);
+        privacy.addView(Ui.title(this, "100% local processing", 18));
+        TextView p = Ui.body(this, "No Groq, Gemini or xAI key is required. Letter images remain on the phone while the local OCR and document-intelligence engine works.");
+        p.setTextColor(Ui.GREEN);
+        privacy.addView(p);
+        root.addView(privacy);
+
         LinearLayout card = Ui.card(this);
-        card.addView(Ui.title(this, "Start today's register", 20));
-        card.addView(Ui.body(this, "Set one receiving date and the first inward number. The app will increase each subsequent inward number automatically."));
+        card.addView(Ui.title(this, "Start a new inward session", 20));
+        card.addView(Ui.body(this, "Choose one receiving date and the first inward number. Every confirmed letter increments the inward number automatically."));
         Button start = Ui.primary(this, "Start New Session");
         start.setOnClickListener(v -> showStartDialog());
         card.addView(start);
         root.addView(card);
 
-        Button settings = Ui.secondary(this, "Admin / AI Settings");
+        Button settings = Ui.secondary(this, "Local AI & Department Settings");
         settings.setOnClickListener(v -> startActivity(new Intent(this, SettingsActivity.class)));
         root.addView(settings);
     }
@@ -81,11 +86,11 @@ public class MainActivity extends Activity {
         JSONArray entries = store.entries();
         LinearLayout summary = Ui.card(this);
         summary.addView(Ui.title(this, "Active Session", 20));
-        TextView d = Ui.body(this, "Receiving date  •  " + store.receivingDate());
+        TextView d = Ui.body(this, "Receiving date      " + store.receivingDate());
         d.setTextSize(16); summary.addView(d);
-        TextView n = Ui.body(this, "Next inward no.  •  " + store.nextInwardNo());
+        TextView n = Ui.body(this, "Next inward no.    " + store.nextInwardNo());
         n.setTextSize(16); summary.addView(n);
-        TextView c = Ui.body(this, "Confirmed letters  •  " + entries.length());
+        TextView c = Ui.body(this, "Confirmed letters  " + entries.length());
         c.setTextSize(16); summary.addView(c);
         root.addView(summary);
 
@@ -99,12 +104,12 @@ public class MainActivity extends Activity {
         export.setOnClickListener(v -> exportAndShare());
         root.addView(export);
 
-        Button settings = Ui.secondary(this, "Admin / AI Settings");
+        Button settings = Ui.secondary(this, "Local AI & Department Settings");
         settings.setOnClickListener(v -> startActivity(new Intent(this, SettingsActivity.class)));
         root.addView(settings);
 
         if (entries.length() > 0) {
-            TextView h = Ui.title(this, "Today's Entries", 19);
+            TextView h = Ui.title(this, "Today's Entries", 20);
             h.setPadding(0, Ui.dp(this,18), 0, Ui.dp(this,8));
             root.addView(h);
             for (int i=0; i<entries.length(); i++) addEntryCard(i, entries.optJSONObject(i));
@@ -129,8 +134,11 @@ public class MainActivity extends Activity {
         String dept = o.optString("Department", "").trim();
         card.addView(Ui.title(this, "#" + inward + (sender.isEmpty() ? "" : "  •  " + sender), 16));
         TextView s = Ui.body(this, subject.isEmpty() ? "Subject not entered" : subject);
-        s.setMaxLines(2); card.addView(s);
-        if (!dept.isEmpty()) card.addView(Ui.body(this, "Department: " + dept));
+        s.setMaxLines(3); card.addView(s);
+        if (!dept.isEmpty()) {
+            TextView dv = Ui.body(this, "Department  •  " + dept);
+            dv.setTextColor(Ui.BLUE_DARK); card.addView(dv);
+        }
         Button edit = Ui.secondary(this, "Review / Edit Entry");
         final int idx = index;
         edit.setOnClickListener(v -> {
