@@ -6,7 +6,7 @@ on:
     paths:
       - "v3-source-parts/**"
       - ".github/workflows/build-goldencareer-v3.yml"
-      - "V3_BUILD_TRIGGER.txt"
+      - "BUILD_V3_TRIGGER.txt"
   workflow_dispatch:
 
 jobs:
@@ -14,9 +14,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    env:
-      ANDROID_HOME: /usr/local/lib/android/sdk
-      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -59,7 +56,6 @@ jobs:
         run: |
           cp android-src/app/build/outputs/apk/debug/app-debug.apk GoldenCareer-v3.0.0.apk
           sha256sum GoldenCareer-v3.0.0.apk > SHA256SUMS-v3.0.0.txt
-          ls -lh GoldenCareer-v3.0.0.apk
 
       - name: Upload Android build artifact
         uses: actions/upload-artifact@v4
