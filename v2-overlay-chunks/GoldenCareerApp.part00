@@ -1,0 +1,78 @@
+package com.goldencareer.app.ui
+
+import android.content.Context
+import android.widget.Toast
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.goldencareer.app.*
+import com.goldencareer.app.model.*
+import kotlin.math.roundToInt
+
+private enum class MainTab(val label:String){HOME("Home"),COURSES("My Courses"),LIVE("Live"),RESOURCES("Resources"),CHAT("Chat")}
+
+@Composable
+fun GoldenCareerApp(vm:AppViewModel,deviceUuid:String,deviceName:String,onStartPayment:(Course,String)->Unit,onOpenLesson:(LessonSummary)->Unit){
+    GoldenCareerTheme{
+        val ui by vm.ui.collectAsState();val context=LocalContext.current
+        LaunchedEffect(ui.toast){ui.toast?.let{Toast.makeText(context,it,Toast.LENGTH_LONG).show();vm.consumeToast()}}
+        if(!ui.authenticated)AuthScreen(ui,deviceUuid,deviceName,vm::login,vm::register)
+        else MainShell(vm,ui,onStartPayment,onOpenLesson)
+    }
+}
+
+@Composable private fun AuthScreen(ui:AppUiState,deviceUuid:String,deviceName:String,onLogin:(String,String,String,String)->Unit,onRegister:(String,String,String,String,String,String)->Unit){
+    var register by remember{mutableStateOf(false)};var name by remember{mutableStateOf("")};var email by remember{mutableStateOf("")};var mobile by remember{mutableStateOf("")};var password by remember{mutableStateOf("")}
+    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Navy,Navy2)))){
+        Column(Modifier.fillMaxWidth().align(Alignment.TopCenter).padding(28.dp,52.dp,28.dp,0.dp)){
+            Row(verticalAlignment=Alignment.CenterVertically){LogoMark(50);Spacer(Modifier.width(12.dp));Column{Text("Golden Career",color=Color.White,fontSize=22.sp,fontWeight=FontWeight.Black);Text("BANKING SUCCESS PLATFORM",color=GoldSoft,fontSize=9.sp,fontWeight=FontWeight.Bold,letterSpacing=1.3.sp)}}
+            Spacer(Modifier.height(28.dp));Text("Prepare smarter.\nInterview stronger.",color=Color.White,fontSize=38.sp,lineHeight=40.sp,fontWeight=FontWeight.Black);Text("Your courses, progress, live classes and resources stay synchronized with goldencareer.co.in.",color=Color(0xFFC4D3E1),fontSize=13.sp,lineHeight=20.sp,modifier=Modifier.padding(top=12.dp,end=20.dp))
+        }
+        Card(Modifier.fillMaxWidth().align(Alignment.BottomCenter),shape=RoundedCornerShape(topStart=32.dp,topEnd=32.dp),colors=CardDefaults.cardColors(containerColor=Color.White)){
+            Column(Modifier.padding(24.dp,25.dp,24.dp,30.dp)){
+                Text(if(register)"Create your account" else "Welcome back",fontSize=25.sp,fontWeight=FontWeight.Black);Text(if(register)"Start learning with one Golden Career account." else "Sign in to continue your learning.",color=Muted,fontSize=12.sp,modifier=Modifier.padding(top=4.dp,bottom=14.dp))
+                if(register)GcField("Full name",name,{name=it},Icons.Default.Person)
+                GcField(if(register)"Email" else "Email or mobile",email,{email=it},Icons.Default.Mail)
+                if(register)GcField("Mobile",mobile,{mobile=it},Icons.Default.Phone)
+                GcField("Password",password,{password=it},Icons.Default.Lock,password=true)
+                Button(onClick={if(register)onRegister(name,email,mobile,password,deviceUuid,deviceName) else onLogin(email,password,deviceUuid,deviceName)},enabled=!ui.busy,modifier=Modifier.fillMaxWidth().height(50.dp),shape=RoundedCornerShape(14.dp)){
+                    if(ui.busy)CircularProgressIndicator(Modifier.size(20.dp),strokeWidth=2.dp,color=Color.White) else Text(if(register)"Create account" else "Sign in",fontWeight=FontWeight.Bold)
+                }
+                TextButton(onClick={register=!register},modifier=Modifier.align(Alignment.CenterHorizontally)){Text(if(register)"Already registered? Sign in" else "New to Golden Career? Create account")}
+            }
+        }
+    }
+}
+
+@Composable private fun GcField(label:String,value:String,onValue:(String)->Unit,icon:androidx.compose.ui.graphics.vector.ImageVector,password:Boolean=false){
+    OutlinedTextField(value,onValue,label={Text(label)},leadingIcon={Icon(icon,null)},visualTransformation=if(password)androidx.compose.ui.text.input.PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,singleLine=true,modifier=Modifier.fillMaxWidth().padding(bottom=9.dp),shape=RoundedCornerShape(13.dp))
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable private fun MainShell(vm:AppViewModel,ui:AppUiState,onStartPayment:(Course,String)->Unit,onOpenLesson:(LessonSummary)->Unit){
+    var tab by remember{mutableStateOf(MainTab.HOME)};var showProfile by remember{mutableStateOf(false)};var showNotifications by remember{mutableStateOf(false)};val selected=ui.selectedCourse !is LoadState.Idle
+    Scaffold(
+        containerColor=Color(0xFFF7F9FB),
+        topBar={TopAppBar(title={Row(verticalAlignment=Alignment.CenterVertically){LogoMark(38);Spacer(Modifier.width(10.dp));Column{Text("Golden Career",fontWeight=FontWeight.Black,fontSize=17.sp);Text(if(selected)"COURSE LEARNING" else "BANKING SUCCESS PLATFORM",color=Muted,fontSize=8.sp,letterSpacing=.9.sp)}}},navigationIcon={if(selected){IconButton(onClick=vm::closeCourse){Icon(Icons.Default.ArrowBack,"Back")}}},actions={if(!selected){IconButton(onClick={showNotifications=true}){Icon(Icons.Default.NotificationsNone,"Notifications")};IconButton(onClick={showProfile=true}){Icon(Icons.Default.AccountCircle,"Profile")}}},colors=TopAppBarDefaults.topAppBarColors(containerColor=Color.White))},
+        bottomBar={if(!selected){NavigationBar(containerColor=Color.White,tonalElevation=6.dp){MainTab.entries.forEach{t->NavigationBarItem(selected=tab==t,onClick={tab=t;if(t==MainTab.COURSES)vm.loadMyCourses()},icon={Icon(when(t){MainTab.HOME->Icons.Default.Home;MainTab.COURSES->Icons.Default.School;MainTab.LIVE->Icons.Default.LiveTv;MainTab.RESOURCES->Icons.Default.Folder;MainTab.CHAT->Icons.Default.ChatBubbleOutline},null)},label={Text(t.label,fontSize=9.sp)})}}}}
+    ){pad->Box(Modifier.padding(pad).fillMaxSize()){
+        if(selected)CourseDetailScreen(ui.selectedCourse,onStartPayment,onOpenLesson,vm:
