@@ -26,12 +26,17 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
-      - name: Restore source
+      - name: Restore Golden Career v4 source
         run: |
+          cat v4-source-parts/part*.b64 > source.b64
+          test "$(wc -c < source.b64)" = "52252"
+          base64 -d source.b64 > source.zip
+          echo "f14595c2ba524ce6b3b0a130e76bb186296fe0c7185755396bb83d95e33f4a85  source.zip" | sha256sum -c -
           rm -rf android-src
           mkdir android-src
-          unzip -q goldencareer-android-source-v4.0.0.zip -d android-src
+          unzip -q source.zip -d android-src
           test -f android-src/settings.gradle.kts
+          test -f android-src/app/build.gradle.kts
           grep -q 'versionName = "4.0.0"' android-src/app/build.gradle.kts
       - name: Build installable APK
         run: |
