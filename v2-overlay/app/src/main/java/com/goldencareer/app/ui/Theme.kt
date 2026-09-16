@@ -23,9 +23,12 @@ val Danger=Color(0xFFB93333)
 private val scheme=lightColorScheme(primary=Navy,onPrimary=Color.White,secondary=Gold,onSecondary=Ink,background=Color(0xFFF7F9FB),surface=Color.White,onSurface=Ink,surfaceVariant=Cream,outline=Line,error=Danger)
 private val typography=Typography(
     headlineLarge=TextStyle(fontSize=34.sp,fontWeight=FontWeight.Black,letterSpacing=(-1.1).sp),
-    headlineMedium=TextStyle(fontSize=27.sp,fontWeight=FontWeight.Black,letterSpacing=(-.7).sp),
+    headlineMedium=TextStyle(fontSize=27.sp,fontWeight=FontWeight.Black,letterSpacing=(-0.7).sp),
     titleLarge=TextStyle(fontSize=20.sp,fontWeight=FontWeight.ExtraBold),
     titleMedium=TextStyle(fontSize=16.sp,fontWeight=FontWeight.Bold),
     bodyLarge=TextStyle(fontSize=15.sp),bodyMedium=TextStyle(fontSize=13.sp),labelLarge=TextStyle(fontSize=13.sp,fontWeight=FontWeight.Bold)
 )
-@Composable fun GoldenCareerTheme(content:@Composable()->Unit){MaterialTheme(colorScheme=scheme,typography=typography,content=content)}
+@Composable
+fun GoldenCareerTheme(content: @Composable () -> Unit) {
+    MaterialTheme(colorScheme=scheme,typography=typography,content=content)
+}
