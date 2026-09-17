@@ -38,6 +38,14 @@ jobs:
           test -f android-src/settings.gradle.kts
           test -f android-src/app/build.gradle.kts
           grep -q 'versionName = "4.0.0"' android-src/app/build.gradle.kts
+      - name: Stamp verified v4.0.1 build
+        run: |
+          sed -i 's/versionCode = 5/versionCode = 6/' android-src/app/build.gradle.kts
+          sed -i 's/versionName = "4.0.0"/versionName = "4.0.1"/' android-src/app/build.gradle.kts
+          sed -i 's/android\/4.0.0/android\/4.0.1/' android-src/app/src/main/java/com/goldencareer/app/data/ApiClient.kt
+          sed -i 's/Golden Career launch edition • API-connected native Android/Golden Career v4.0.1 • verified API-connected native Android/' android-src/app/src/main/java/com/goldencareer/app/ui/GoldenCareerApp.kt
+          grep -q 'versionCode = 6' android-src/app/build.gradle.kts
+          grep -q 'versionName = "4.0.1"' android-src/app/build.gradle.kts
       - name: Build installable APK
         run: |
           cd android-src
@@ -45,11 +53,11 @@ jobs:
       - name: Prepare artifact
         run: |
           mkdir -p artifact
-          cp android-src/app/build/outputs/apk/debug/app-debug.apk artifact/GoldenCareer-v4.0.0.apk
-          sha256sum artifact/GoldenCareer-v4.0.0.apk > artifact/SHA256SUMS.txt
+          cp android-src/app/build/outputs/apk/debug/app-debug.apk artifact/GoldenCareer-v4.0.1.apk
+          sha256sum artifact/GoldenCareer-v4.0.1.apk > artifact/SHA256SUMS.txt
       - name: Upload build
         uses: actions/upload-artifact@v4
         with:
-          name: GoldenCareer-v4.0.0-build
+          name: GoldenCareer-v4.0.1-build
           path: artifact/*
           if-no-files-found: error
