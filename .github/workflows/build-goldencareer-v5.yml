@@ -31,7 +31,8 @@ jobs:
           gradle-version: '8.13'
       - name: Restore verified Golden Career v5.0.2 source
         run: |
-          cat v5-source-parts/part*.b64 > source.b64
+          head -c 6000 v5-source-parts/part000.b64 > source.b64
+          for f in v5-source-parts/part00{1..9}.b64; do cat "$f" >> source.b64; done
           test "$(wc -c < source.b64)" = "56588"
           base64 -d source.b64 > source.zip
           echo "f7e889a5789c892c9d31c2576c8fb5a582bcec078297ca1afb0f318a0220c1d1  source.zip" | sha256sum -c -
