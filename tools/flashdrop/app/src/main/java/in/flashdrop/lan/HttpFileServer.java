@@ -1,7 +1,5 @@
 package in.flashdrop.lan;
 
-import android.content.Context;
-import android.content.res.AssetManager;
 import android.util.Base64;
 
 import java.io.*;
@@ -18,9 +16,9 @@ import java.util.concurrent.atomic.AtomicLong;
  * One proven hotspot port for UI, browsing, benchmarks and continuous bundle streaming.
  */
 public class HttpFileServer {
-    private final Context context;
     private final File root;
     private final String pin;
+    private final byte[] turboExe;
 
     private volatile boolean running;
     private ServerSocket server;
@@ -31,10 +29,10 @@ public class HttpFileServer {
     private final AtomicLong bytesServed = new AtomicLong();
     private final AtomicInteger activeTransfers = new AtomicInteger();
 
-    public HttpFileServer(Context context, File root, String pin) throws IOException {
-        this.context = context.getApplicationContext();
+    public HttpFileServer(File root, String pin, byte[] turboExe) throws IOException {
         this.root = root.getCanonicalFile();
         this.pin = pin;
+        this.turboExe = turboExe;
     }
 
     public void start() throws IOException {
@@ -213,14 +211,13 @@ public class HttpFileServer {
     }
 
     private void serveAsset(OutputStream out,String asset,String type) throws IOException {
-        AssetManager am=context.getAssets();
-        try(InputStream ai=am.open(asset,AssetManager.ACCESS_STREAMING)) {
-            long len=am.openFd(asset).getLength();
-            writeHeaders(out,200,type,len,"close","Content-Disposition: attachment; filename=\"FlashDropTurbo.exe\"\r\n");
-            copy(ai,out);
-        } catch(FileNotFoundException e) {
+        if(turboExe==null || turboExe.length==0) {
             textError(out,404,"Windows client not embedded");
+            return;
         }
+        writeHeaders(out,200,type,turboExe.length,"close","Content-Disposition: attachment; filename=\"FlashDropTurbo.exe\"\r\n");
+        out.write(turboExe);
+        out.flush();
     }
 
     private void serveList(OutputStream out,String rawPath) throws IOException {
