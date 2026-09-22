@@ -60,9 +60,6 @@ public class FileServerService extends Service {
             ftpServer = new FtpFileServer(root);
             ftpServer.start();
 
-            turboServer = new TurboFileServer(root, pin);
-            turboServer.start();
-
             String ip = httpServer.getBestIpAddress();
             httpUrl = "http://" + ip + ":" + httpServer.getPort();
             ftpUrl = "ftp://" + ip + ":" + ftpServer.getPort() + "/";
@@ -158,7 +155,7 @@ public class FileServerService extends Service {
 
     @Override public IBinder onBind(Intent intent) { return null; }
 
-    public static boolean isRunning() { return running && httpServer != null && ftpServer != null && turboServer != null; }
+    public static boolean isRunning() { return running && httpServer != null && ftpServer != null; }
     public static String getHttpUrl() { return httpUrl; }
     public static String getFtpUrl() { return ftpUrl; }
     public static String getPin() { return pin; }
@@ -166,13 +163,11 @@ public class FileServerService extends Service {
     public static long getBytesServed() {
         long a = httpServer == null ? 0L : httpServer.getBytesServed();
         long b = ftpServer == null ? 0L : ftpServer.getBytesServed();
-        long c = turboServer == null ? 0L : turboServer.getBytesServed();
-        return a + b + c;
+        return a + b;
     }
     public static int getActiveTransfers() {
         int a = httpServer == null ? 0 : httpServer.getActiveTransfers();
         int b = ftpServer == null ? 0 : ftpServer.getActiveTransfers();
-        int c = turboServer == null ? 0 : turboServer.getActiveTransfers();
-        return a + b + c;
+        return a + b;
     }
 }
