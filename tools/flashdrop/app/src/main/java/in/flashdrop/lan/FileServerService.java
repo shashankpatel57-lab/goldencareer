@@ -26,6 +26,7 @@ public class FileServerService extends Service {
     private static volatile String pin = "------";
     private static volatile HttpFileServer httpServer;
     private static volatile FtpFileServer ftpServer;
+    private static volatile TurboFileServer turboServer;
     private static PowerManager.WakeLock wakeLock;
     private static WifiManager.WifiLock wifiLock;
 
@@ -59,13 +60,16 @@ public class FileServerService extends Service {
             ftpServer = new FtpFileServer(root);
             ftpServer.start();
 
+            turboServer = new TurboFileServer(root, pin);
+            turboServer.start();
+
             String ip = httpServer.getBestIpAddress();
             httpUrl = "http://" + ip + ":" + httpServer.getPort();
             ftpUrl = "ftp://" + ip + ":" + ftpServer.getPort() + "/";
             running = true;
 
             NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-            nm.notify(1001, buildNotification("Turbo: " + httpUrl + " • Explorer: " + ftpUrl));
+            nm.notify(1001, buildNotification("Turbo TCP active • " + httpUrl + " • Explorer: " + ftpUrl));
         } catch (Exception e) {
             running = false;
             httpUrl = null;
@@ -101,6 +105,10 @@ public class FileServerService extends Service {
         if (ftpServer != null) {
             try { ftpServer.stop(); } catch (Exception ignored) {}
             ftpServer = null;
+        }
+        if (turboServer != null) {
+            try { turboServer.stop(); } catch (Exception ignored) {}
+            turboServer = null;
         }
         releaseLocks();
     }
@@ -150,18 +158,21 @@ public class FileServerService extends Service {
 
     @Override public IBinder onBind(Intent intent) { return null; }
 
-    public static boolean isRunning() { return running && httpServer != null && ftpServer != null; }
+    public static boolean isRunning() { return running && httpServer != null && ftpServer != null && turboServer != null; }
     public static String getHttpUrl() { return httpUrl; }
     public static String getFtpUrl() { return ftpUrl; }
     public static String getPin() { return pin; }
+    public static int getTurboPort() { return turboServer == null ? 9091 : turboServer.getPort(); }
     public static long getBytesServed() {
         long a = httpServer == null ? 0L : httpServer.getBytesServed();
         long b = ftpServer == null ? 0L : ftpServer.getBytesServed();
-        return a + b;
+        long c = turboServer == null ? 0L : turboServer.getBytesServed();
+        return a + b + c;
     }
     public static int getActiveTransfers() {
         int a = httpServer == null ? 0 : httpServer.getActiveTransfers();
         int b = ftpServer == null ? 0 : ftpServer.getActiveTransfers();
-        return a + b;
+        int c = turboServer == null ? 0 : turboServer.getActiveTransfers();
+        return a + b + c;
     }
 }
