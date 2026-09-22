@@ -1,4 +1,70 @@
-       rel = Path.Combine("_LongPaths", compact);
+le.Exists(f.FinalPath))
+                                actual = new FileInfo(f.FinalPath).Length;
+                            else if (File.Exists(f.PartPath))
+                                actual = new FileInfo(f.PartPath).Length;
+                        }
+                        catch { }
+
+                        if (actual != f.Size)
+                        {
+                            sw.WriteLine(
+                                Csv("INCOMPLETE") + "," +
+                                Csv(f.RemotePath) + "," +
+                                Csv(f.FinalPath) + "," +
+                                f.Size + "," +
+                                actual + "," +
+                                Csv("Safe to resume"));
+                        }
+                    }
+
+                    foreach (string e in errors)
+                        sw.WriteLine(Csv("TRANSFER_ERROR") + "," + Csv(e) + ",,,,");
+                    foreach (string e in verifyErrors)
+                        sw.WriteLine(Csv("VERIFY_ERROR") + "," + Csv(e) + ",,,,");
+                }
+            }
+            catch { }
+        }
+
+        static string Csv(string s)
+        {
+            s = s ?? "";
+            return """ + s.Replace(""", """") + """;
+        }
+
+        async Task BuildManifestAsync(
+            FtpSession ftp,
+            string remote,
+            string relative,
+            string destRoot,
+            List<RemoteFile> files,
+            CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+
+            List<FtpItem> items;
+
+            try
+            {
+                items = await ftp.ListAsync(remote, token);
+            }
+            catch
+            {
+                return;
+            }
+
+            foreach (var x in items)
+            {
+                token.ThrowIfCancellationRequested();
+
+                string safe = CompactComponent(Sanitize(x.Name), 72);
+                string rel = string.IsNullOrEmpty(relative) ? safe : Path.Combine(relative, safe);
+                string local = Path.Combine(destRoot, rel);
+
+                if (local.Length > 205)
+                {
+                    string compact = "_" + Hash8(x.FullPath) + "_" + CompactComponent(safe, 42);
+                    rel = Path.Combine("_LongPaths", compact);
                     local = Path.Combine(destRoot, rel);
                 }
 
@@ -164,7 +230,7 @@
         {
             using (var f = new FolderBrowserDialog
             {
-                Description = "Choose where FlashDrop should save the phone folder",
+                Description = "Choose where BharatDrop should save the phone folder",
                 ShowNewFolderButton = true,
                 SelectedPath = Directory.Exists(localBox.Text) ? localBox.Text : ""
             })
@@ -257,6 +323,19 @@
             };
             b.FlatAppearance.BorderSize = 0;
             return b;
+        }
+
+        CheckBox Check(string text, bool value)
+        {
+            return new CheckBox
+            {
+                Text = text,
+                Checked = value,
+                AutoSize = true,
+                ForeColor = Ink,
+                Font = new Font("Segoe UI", 8.7f),
+                Margin = new Padding(4, 7, 4, 2)
+            };
         }
 
         NumericUpDown Num(decimal min, decimal max, decimal value)

@@ -1,23 +1,4 @@
-        }
-
-        static async Task<int> ReadWithTimeoutAsync(
-            Stream input,
-            byte[] buffer,
-            int offset,
-            int count,
-            int timeoutMs,
-            CancellationToken token)
-        {
-            var task = input.ReadAsync(buffer, offset, count, token);
-            var winner = await Task.WhenAny(task, Task.Delay(timeoutMs, token));
-
-            if (winner != task)
-            {
-                token.ThrowIfCancellationRequested();
-                throw new IOException(
-                    "No data received for " +
-                    (timeoutMs / 1000) +
-                    " seconds");
+                   " seconds");
             }
 
             return await task;
@@ -198,22 +179,31 @@
 
     sealed class MainForm : Form
     {
+        [DllImport("kernel32.dll")]
+        static extern uint SetThreadExecutionState(uint esFlags);
+
+        const uint ES_CONTINUOUS = 0x80000000;
+        const uint ES_SYSTEM_REQUIRED = 0x00000001;
+        const uint ES_DISPLAY_REQUIRED = 0x00000002;
         readonly Color Ink = Color.FromArgb(18, 29, 51);
         readonly Color Muted = Color.FromArgb(100, 110, 130);
         readonly Color Blue = Color.FromArgb(73, 63, 240);
         readonly Color Green = Color.FromArgb(0, 148, 120);
         readonly Color Bg = Color.FromArgb(245, 247, 252);
 
-        TextBox addressBox, localBox;
+        TextBox addressBox, pinBox, localBox;
         Label connectionLabel, pathLabel, statusLabel, speedLabel, totalLabel;
         ListView remoteList;
-        Button detectBtn, connectBtn, upBtn, refreshBtn, browseBtn, openBtn, startBtn, cancelBtn;
+        Button detectBtn, connectBtn, upBtn, refreshBtn, browseBtn, openBtn, startBtn, pauseBtn, cancelBtn;
         NumericUpDown workersBox, bufferBox;
         ProgressBar progress;
+        CheckBox verifyCheck, reportCheck, openWhenDoneCheck, keepAwakeCheck;
 
         FtpEndpoint endpoint;
         string currentPath = "/";
         CancellationTokenSource transferCts;
+        readonly ManualResetEventSlim pauseGate = new ManualResetEventSlim(true);
+        volatile bool paused = false;
 
         long totalBytes;
         long completedBytes;
@@ -224,7 +214,7 @@
 
         public MainForm()
         {
-            Text = "FlashDrop Turbo v4.0 - Packed Folder Engine - by Shashank Patel";
+            Text = "BharatDrop Desktop v5.0 - by Shashank Patel";
             StartPosition = FormStartPosition.CenterScreen;
             MinimumSize = new Size(1000, 720);
             Size = new Size(1180, 820);
@@ -250,22 +240,22 @@
             outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 108));
             outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 126));
             outer.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 120));
+            outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 164));
             outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 96));
             Controls.Add(outer);
 
             var hero = new HeroPanel { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 10) };
             outer.Controls.Add(hero, 0, 0);
 
-            var title = LabelX("FLASHDROP TURBO 3", 23, Color.White, true);
+            var title = LabelX("BHARATDROP DESKTOP", 23, Color.White, true);
             title.Location = new Point(26, 14);
             hero.Controls.Add(title);
 
-            var sub = LabelX("Packed-folder Turbo • hundreds of files per batch • optimized for huge folders", 11.5f, Color.FromArgb(239, 246, 255), false);
+            var sub = LabelX("Made in India • local-only transfer • no cloud • no data retention", 11.5f, Color.FromArgb(239, 246, 255), false);
             sub.Location = new Point(28, 51);
             hero.Controls.Add(sub);
 
-            var by = LabelX("Designed & built by Shashank Patel", 9.5f, Color.FromArgb(226, 252, 245), true);
+            var by = LabelX("Developer: Shashank Patel • Packed Stream v5", 9.5f, Color.FromArgb(226, 252, 245), true);
             by.Location = new Point(28, 78);
             hero.Controls.Add(by);
 
@@ -276,7 +266,7 @@
             var g = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                ColumnCount = 6,
+                ColumnCount = 7,
                 RowCount = 3,
                 Padding = new Padding(14, 10, 14, 8),
                 BackColor = Color.White
@@ -285,16 +275,18 @@
             g.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
             g.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             g.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            g.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 118));
-            g.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 105));
-            g.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 82));
+            g.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 112));
+            g.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 98));
             g.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 92));
-            g.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 155));
+            g.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 78));
+            g.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 88));
+            g.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 145));
             connectCard.Controls.Add(g);
 
-            g.Controls.Add(LabelX("PHONE FTP ADDRESS", 8.5f, Muted, true), 0, 0);
-            g.Controls.Add(LabelX("WORKERS", 8.5f, Muted, true), 3, 0);
-            g.Controls.Add(LabelX("BUFFER MB", 8.5f, Muted, true), 4, 0);
+            g.Controls.Add(LabelX("PHONE ADDRESS", 8.5f, Muted, true), 0, 0);
+            g.Controls.Add(LabelX("SESSION PIN", 8.5f, Muted, true), 3, 0);
+            g.Controls.Add(LabelX("WORKERS", 8.5f, Muted, true), 4, 0);
+            g.Controls.Add(LabelX("BUFFER MB", 8.5f, Muted, true), 5, 0);
 
             addressBox = Box();
             addressBox.Text = "";
@@ -308,21 +300,26 @@
             connectBtn.Click += async (s, e) => await ConnectAndLoadAsync();
             g.Controls.Add(connectBtn, 2, 1);
 
+            pinBox = Box();
+            pinBox.MaxLength = 6;
+            pinBox.TextAlign = HorizontalAlignment.Center;
+            g.Controls.Add(pinBox, 3, 1);
+
             workersBox = Num(1, 8, 6);
-            g.Controls.Add(workersBox, 3, 1);
+            g.Controls.Add(workersBox, 4, 1);
 
             bufferBox = Num(1, 8, 1);
-            g.Controls.Add(bufferBox, 4, 1);
+            g.Controls.Add(bufferBox, 5, 1);
 
-            connectionLabel = LabelX("Waiting for phone...", 9.5f, Muted, true);
+            connectionLabel = LabelX("Waiting for phone...", 9.3f, Muted, true);
             connectionLabel.Dock = DockStyle.Fill;
             connectionLabel.TextAlign = ContentAlignment.MiddleLeft;
-            g.Controls.Add(connectionLabel, 5, 1);
+            g.Controls.Add(connectionLabel, 6, 1);
 
-            var hint = LabelX("No PIN is required in Turbo 3. The phone FTP server is read-only and must be manually started.", 9.1f, Color.FromArgb(76, 87, 111), false);
+            var hint = LabelX("Enter the 6-digit PIN shown on BharatDrop Android. Select a folder below, or transfer the current open folder.", 9.0f, Color.FromArgb(76, 87, 111), false);
             hint.Dock = DockStyle.Fill;
             hint.TextAlign = ContentAlignment.MiddleLeft;
-            g.SetColumnSpan(hint, 6);
+            g.SetColumnSpan(hint, 7);
             g.Controls.Add(hint, 0, 2);
 
             var browserCard = Card();
@@ -332,4 +329,59 @@
             var browser = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
-            
+                ColumnCount = 1,
+                RowCount = 2,
+                BackColor = Color.White
+            };
+            browser.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
+            browser.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            browserCard.Controls.Add(browser);
+
+            var nav = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 4,
+                RowCount = 1,
+                Padding = new Padding(12, 8, 12, 6),
+                BackColor = Color.FromArgb(249, 250, 253)
+            };
+            nav.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 80));
+            nav.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100));
+            nav.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            nav.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 175));
+            browser.Controls.Add(nav, 0, 0);
+
+            upBtn = Btn("UP", Color.FromArgb(240, 244, 250), Ink);
+            upBtn.Click += async (s, e) => await UpAsync();
+            nav.Controls.Add(upBtn, 0, 0);
+
+            refreshBtn = Btn("REFRESH", Color.FromArgb(240, 244, 250), Ink);
+            refreshBtn.Click += async (s, e) => await LoadFolderAsync(currentPath);
+            nav.Controls.Add(refreshBtn, 1, 0);
+
+            pathLabel = LabelX("Internal storage", 10, Ink, true);
+            pathLabel.Dock = DockStyle.Fill;
+            pathLabel.TextAlign = ContentAlignment.MiddleLeft;
+            pathLabel.AutoEllipsis = true;
+            nav.Controls.Add(pathLabel, 2, 0);
+
+            var browseHint = LabelX("Double-click folder to open", 8.8f, Muted, false);
+            browseHint.Dock = DockStyle.Fill;
+            browseHint.TextAlign = ContentAlignment.MiddleRight;
+            nav.Controls.Add(browseHint, 3, 0);
+
+            remoteList = new ListView
+            {
+                Dock = DockStyle.Fill,
+                View = View.Details,
+                FullRowSelect = true,
+                HideSelection = false,
+                BorderStyle = BorderStyle.None,
+                BackColor = Color.White,
+                Font = new Font("Segoe UI", 9.5f)
+            };
+            remoteList.Columns.Add("Name", 520);
+            remoteList.Columns.Add("Type", 105);
+            remoteList.Columns.Add("Size", 125);
+            remoteList.Columns.Add("Modified", 180);
+            remoteList.DoubleClick += async (s, e) => await OpenSelect

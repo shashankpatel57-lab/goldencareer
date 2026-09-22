@@ -10,6 +10,8 @@ using System.Linq;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Security.Cryptography;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -77,6 +79,7 @@ namespace FlashDropTurbo
         readonly string host;
         readonly int port;
         readonly bool preferTurbo;
+        readonly string pin;
 
         TcpClient control;
         NetworkStream stream;
@@ -85,11 +88,12 @@ namespace FlashDropTurbo
         bool packedActive;
         byte[] transferBuffer;
 
-        public FtpSession(string host, int port, bool preferTurbo)
+        public FtpSession(string host, int port, bool preferTurbo, string pin)
         {
             this.host = host;
             this.port = port;
             this.preferTurbo = preferTurbo;
+            this.pin = pin == null ? "" : pin.Trim();
         }
 
         public bool TurboActive { get { return turboActive; } }
@@ -117,13 +121,13 @@ namespace FlashDropTurbo
             var hello = await ReadResponseAsync(8000, token);
             Expect(hello, 220);
 
-            var u = await CommandAsync("USER flashdrop", token);
+            var u = await CommandAsync("USER bharat", token);
             if (u.Code != 230 && u.Code != 331)
                 throw new IOException("FTP login failed: " + u.Text);
 
             if (u.Code == 331)
             {
-                var p = await CommandAsync("PASS turbo", token);
+                var p = await CommandAsync("PASS " + pin, token);
                 Expect(p, 230);
             }
 
@@ -196,7 +200,8 @@ namespace FlashDropTurbo
             List<RemoteFile> files,
             int bufferBytes,
             CancellationToken token,
-            Action<int> onBytes)
+            Action<int> onBytes,
+            Action waitIfPaused)
         {
             EnsureConnected();
 
@@ -204,6 +209,13 @@ namespace FlashDropTurbo
                 throw new IOException("Packed stream mode is not active");
 
             if (files == null || files.Count == 0)
+                return;
+
+            files = files.Where(f =>
+                !(File.Exists(f.FinalPath) &&
+                  new FileInfo(f.FinalPath).Length == f.Size)).ToList();
+
+            if (files.Count == 0)
                 return;
 
             if (files.Count > 2000)
@@ -241,8 +253,9 @@ namespace FlashDropTurbo
             for (int i = 0; i < files.Count; i++)
             {
                 token.ThrowIfCancellationRequested();
+                if (waitIfPaused != null) waitIfPaused();
 
-                var header = await ReadResponseAsync(20000, token);
+                var header = await ReadResponseAsync(30000, token);
 
                 if (header.Code == 550)
                     throw new IOException("Phone file unavailable: " + files[i].RemotePath);
@@ -299,6 +312,7 @@ namespace FlashDropTurbo
                     while (got < length)
                     {
                         token.ThrowIfCancellationRequested();
+                        if (waitIfPaused != null) waitIfPaused();
 
                         int want = (int)Math.Min(
                             transferBuffer.Length,
@@ -339,37 +353,85 @@ namespace FlashDropTurbo
                 throw new IOException("Packed batch did not finish: " + done.Text);
         }
 
-        static long SafePartLengthLocal(RemoteFile f)
+        public async Task VerifyBatchAsync(
+            List<RemoteFile> files,
+            CancellationToken token,
+            ConcurrentQueue<string> verifyErrors,
+            Action waitIfPaused)
         {
-            try
+            EnsureConnected();
+
+            if (files == null || files.Count == 0)
+                return;
+
+            if (files.Count > 500)
+                throw new IOException("Verification batch too large");
+
+            var start = await CommandAsync(
+                "XHASHB " + files.Count.ToString(CultureInfo.InvariantCulture),
+                token);
+
+            if (start.Code != 150)
+                throw new IOException("Phone does not support SHA-256 verification: " + start.Text);
+
+            foreach (var f in files)
             {
-                if (!File.Exists(f.PartPath)) return 0;
+                string encoded = Convert.ToBase64String(
+                    Encoding.UTF8.GetBytes(NormalizeRemote(f.RemotePath)));
+                await writer.WriteLineAsync(encoded);
+            }
+            await writer.FlushAsync();
 
-                long n = new FileInfo(f.PartPath).Length;
+            for (int i = 0; i < files.Count; i++)
+            {
+                token.ThrowIfCancellationRequested();
+                if (waitIfPaused != null) waitIfPaused();
 
-                if (n < 0 || n > f.Size)
+                var response = await ReadResponseAsync(120000, token);
+                var file = files[i];
+
+                if (response.Code != 213)
                 {
-                    File.Delete(f.PartPath);
-                    return 0;
+                    verifyErrors.Enqueue(file.RemotePath + " : phone hash unavailable");
+                    continue;
                 }
 
-                return n;
+                string[] p = response.Text.Split(
+                    new[] { ' ' },
+                    StringSplitOptions.RemoveEmptyEntries);
+
+                if (p.Length < 4)
+                {
+                    verifyErrors.Enqueue(file.RemotePath + " : invalid hash response");
+                    continue;
+                }
+
+                long remoteSize;
+                if (!long.TryParse(p[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out remoteSize))
+                {
+                    verifyErrors.Enqueue(file.RemotePath + " : invalid remote size");
+                    continue;
+                }
+
+                string remoteHash = p[3].Trim();
+
+                if (!File.Exists(file.FinalPath))
+                {
+                    verifyErrors.Enqueue(file.RemotePath + " : local file missing");
+                    continue;
+                }
+
+                var info = new FileInfo(file.FinalPath);
+                if (info.Length != remoteSize)
+                {
+                    verifyErrors.Enqueue(file.RemotePath + " : size mismatch");
+                    continue;
+                }
+
+                string localHash = Sha256File(file.FinalPath, token, waitIfPaused);
+
+                if (!string.Equals(localHash, remoteHash, StringComparison.OrdinalIgnoreCase))
+                    verifyErrors.Enqueue(file.RemotePath + " : SHA-256 mismatch");
             }
-            catch
-            {
-                return 0;
-            }
-        }
 
-        static void FinalizeLocalFile(RemoteFile file)
-        {
-            long size = File.Exists(file.PartPath)
-                ? new FileInfo(file.PartPath).Length
-                : 0;
-
-            if (size != file.Size)
-                throw new IOException(
-                    "Incomplete local file " +
-                    size + "/" + file.Size);
-
-            if (File.Exists(file.Fi
+            var done = await ReadResponseAsync(
