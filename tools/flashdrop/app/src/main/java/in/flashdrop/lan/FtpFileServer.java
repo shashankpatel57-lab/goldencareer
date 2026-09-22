@@ -3,6 +3,7 @@ package in.flashdrop.lan;
 import java.io.*;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.*;
@@ -15,6 +16,7 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public class FtpFileServer {
     private final File root;
+    private final String pin;
     private volatile boolean running;
     private ServerSocket controlServer;
     private Thread acceptThread;
@@ -23,8 +25,9 @@ public class FtpFileServer {
     private final AtomicLong bytesServed = new AtomicLong();
     private final AtomicInteger activeTransfers = new AtomicInteger();
 
-    public FtpFileServer(File root) throws IOException {
+    public FtpFileServer(File root, String pin) throws IOException {
         this.root = root.getCanonicalFile();
+        this.pin = pin == null ? "" : pin.trim();
     }
 
     public void start() throws IOException {
@@ -45,7 +48,7 @@ public class FtpFileServer {
 
         pool = new ThreadPoolExecutor(4, 32, 60L, TimeUnit.SECONDS,
                 new LinkedBlockingQueue<Runnable>(128), r -> {
-            Thread t = new Thread(r, "FlashDropFTP");
+            Thread t = new Thread(r, "BharatDropFTP");
             t.setDaemon(true);
             return t;
         }, new ThreadPoolExecutor.CallerRunsPolicy());
@@ -62,7 +65,7 @@ public class FtpFileServer {
                     if (!running) break;
                 }
             }
-        }, "FlashDropFTPAccept");
+        }, "BharatDropFTPAccept");
         acceptThread.setDaemon(true);
         acceptThread.start();
     }
@@ -87,7 +90,7 @@ public class FtpFileServer {
              BufferedReader in = new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8));
              BufferedWriter out = new BufferedWriter(new OutputStreamWriter(s.getOutputStream(), StandardCharsets.UTF_8))) {
 
-            reply(out, 220, "FlashDrop Direct FTP ready");
+            reply(out, 220, "BharatDrop Secure FTP ready");
             String line;
             while (running && (line = in.readLine()) != null) {
                 String cmd;
@@ -97,12 +100,17 @@ public class FtpFileServer {
                 else { cmd = line.substring(0, sp).trim().toUpperCase(Locale.US); arg = line.substring(sp + 1).trim(); }
 
                 if ("USER".equals(cmd)) {
-                    reply(out, 331, "Guest login okay, send password");
+                    reply(out, 331, "BharatDrop PIN required");
                     continue;
                 }
                 if ("PASS".equals(cmd)) {
-                    loggedIn = true;
-                    reply(out, 230, "Logged in - read only");
+                    if (pin.equals(arg)) {
+                        loggedIn = true;
+                        reply(out, 230, "Logged in - secure read only");
+                    } else {
+                        loggedIn = false;
+                        reply(out, 530, "Incorrect BharatDrop PIN");
+                    }
                     continue;
                 }
                 if ("QUIT".equals(cmd)) {
@@ -110,7 +118,7 @@ public class FtpFileServer {
                     break;
                 }
                 if (!loggedIn) {
-                    reply(out, 530, "Please login with any username/password");
+                    reply(out, 530, "Please login using the BharatDrop PIN");
                     continue;
                 }
 
@@ -126,6 +134,7 @@ public class FtpFileServer {
                         writeRaw(out, " REST STREAM\r\n");
                         writeRaw(out, " XFD1\r\n");
                         writeRaw(out, " XFD2\r\n");
+                        writeRaw(out, " XHASHB SHA-256\r\n");
                         writeRaw(out, " MLST type*;size*;modify*;\r\n");
                         writeRaw(out, "211 End\r\n");
                         break;
@@ -255,8 +264,11 @@ public class FtpFileServer {
                         reply(out, 200, "XFD1 READY");
                         handleTurboStream(s, in, out);
                         return;
+                    case "XHASHB":
+                        handleHashBatch(in, out, arg);
+                        break;
                     case "STAT":
-                        reply(out, 211, "FlashDrop Direct ready; read-only shared storage");
+                        reply(out, 211, "BharatDrop ready; secure read-only shared storage");
                         break;
                     case "STOR": case "APPE": case "DELE": case "RMD": case "XRMD":
                     case "MKD": case "XMKD": case "RNFR": case "RNTO": case "SITE":
@@ -477,6 +489,76 @@ public class FtpFileServer {
         } catch (Exception e) {
             return file.getName();
         }
+    }
+
+    private void handleHashBatch(
+            BufferedReader in,
+            BufferedWriter out,
+            String countArg) throws IOException {
+
+        int count;
+        try {
+            count = Integer.parseInt(countArg.trim());
+        } catch (Exception e) {
+            reply(out, 501, "Bad hash count");
+            return;
+        }
+
+        if (count < 1 || count > 2000) {
+            reply(out, 501, "Hash count out of range");
+            return;
+        }
+
+        reply(out, 150, "HASH " + count);
+
+        for (int i = 0; i < count; i++) {
+            String encoded = in.readLine();
+            if (encoded == null) throw new EOFException("Hash request ended early");
+
+            String remote;
+            try {
+                remote = new String(
+                        android.util.Base64.decode(encoded.trim(), android.util.Base64.DEFAULT),
+                        StandardCharsets.UTF_8);
+            } catch (Exception e) {
+                writeRaw(out, "550 " + i + " 0 BAD_PATH\r\n");
+                continue;
+            }
+
+            File f = resolve(root, remote);
+            if (f == null || !f.isFile() || !f.canRead()) {
+                writeRaw(out, "550 " + i + " 0 FILE_UNAVAILABLE\r\n");
+                continue;
+            }
+
+            try {
+                String sha = sha256(f);
+                writeRaw(out,
+                        "213 " + i + " " + f.length() + " " + sha + "\r\n");
+            } catch (Exception e) {
+                writeRaw(out, "550 " + i + " " + f.length() + " HASH_FAILED\r\n");
+            }
+        }
+
+        writeRaw(out, "226 HASH DONE\r\n");
+    }
+
+    private String sha256(File file) throws Exception {
+        MessageDigest md = MessageDigest.getInstance("SHA-256");
+        byte[] buf = new byte[1024 * 1024];
+
+        try (InputStream in = new BufferedInputStream(new FileInputStream(file), buf.length)) {
+            int n;
+            while ((n = in.read(buf)) >= 0) {
+                if (n > 0) md.update(buf, 0, n);
+            }
+        }
+
+        byte[] digest = md.digest();
+        StringBuilder sb = new StringBuilder(digest.length * 2);
+        for (byte b : digest)
+            sb.append(String.format(Locale.US, "%02x", b & 0xff));
+        return sb.toString();
     }
 
     private void handlePackedStream(Socket socket, BufferedReader in, BufferedWriter controlOut) throws IOException {
