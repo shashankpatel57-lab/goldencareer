@@ -40,7 +40,7 @@ yles.Add(new ColumnStyle(SizeType.Percent, 36));
             browseBtn=Btn("Choose Folder",Color.FromArgb(235,249,245),Green); browseBtn.Click+=(s,e)=>ChooseFolder(); d.Controls.Add(browseBtn,1,1);
             openBtn=Btn("Open Folder",Color.FromArgb(241,244,250),Ink); openBtn.Click+=(s,e)=>OpenDestination(); d.Controls.Add(openBtn,2,1);
             startBtn=Btn("START TURBO COPY",Green,Color.White); startBtn.Click+=async(s,e)=>await StartTransferAsync(); d.Controls.Add(startBtn,3,1);
-            cancelBtn=Btn("Cancel",Color.FromArgb(255,239,239),Color.FromArgb(180,50,50)); cancelBtn.Enabled=false; cancelBtn.Click+=(s,e)=>cts?.Cancel(); d.Controls.Add(cancelBtn,4,1);
+            cancelBtn=Btn("Cancel",Color.FromArgb(255,239,239),Color.FromArgb(180,50,50)); cancelBtn.Enabled=false; cancelBtn.Click+=(s,e)=>{ if(cts!=null) cts.Cancel(); }; d.Controls.Add(cancelBtn,4,1);
             root.Controls.Add(destCard,0,2);
 
             var bottom = new Panel { Dock=DockStyle.Fill, Height=78, BackColor=Bg, Paddi
