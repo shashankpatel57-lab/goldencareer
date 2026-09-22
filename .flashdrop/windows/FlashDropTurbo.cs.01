@@ -1,4 +1,4 @@
-          grid.Controls.Add(L("BUFFER MB",8.5f,Muted,true),5,0);
+           grid.Controls.Add(L("BUFFER MB",8.5f,Muted,true),5,0);
 
             addressBox = Box();
             addressBox.Text = "http://192.168.1.1:8080";
@@ -141,4 +141,4 @@
 
             startBtn=Btn("START TURBO COPY",Green,Color.White);
             startBtn.Font=new Font("Segoe UI",10f,FontStyle.Bold);
-            startBtn.Click+=async(s,e)=>await StartTransf
+            startBtn.Click+=async(s,e)=>await StartTran

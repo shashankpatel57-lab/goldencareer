@@ -1,4 +1,4 @@
-                }
+                    }
                         }
                     }
                     catch
@@ -42,7 +42,7 @@
                                 catch(Exception ex)
                                 {
                                     last=ex;
-                                    await Task.Delay(350*attempt,token);
+                                    Thread.Sleep(350*attempt);
                                 }
                             }
 
@@ -159,4 +159,4 @@
                     long got=0;
                     while(got<bytes)
                     {
-                        i
+                        int n=

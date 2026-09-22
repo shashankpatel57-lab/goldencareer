@@ -1,4 +1,4 @@
-nt n=await ns.ReadAsync(buf,0,(int)Math.Min(buf.Length,bytes-got),token);
+await ns.ReadAsync(buf,0,(int)Math.Min(buf.Length,bytes-got),token);
                         if(n<=0)break;
                         got+=n;
                     }

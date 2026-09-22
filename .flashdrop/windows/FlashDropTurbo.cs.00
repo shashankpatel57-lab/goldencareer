@@ -172,4 +172,4 @@ namespace FlashDropTurbo
             grid.Controls.Add(L("PHONE HTTP ADDRESS",8.5f,Muted,true),0,0);
             grid.Controls.Add(L("6-DIGIT PIN",8.5f,Muted,true),1,0);
             grid.Controls.Add(L("WORKERS",8.5f,Muted,true),4,0);
-  
+ 

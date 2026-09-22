@@ -1,4 +1,4 @@
-erAsync();
+sferAsync();
             d.Controls.Add(startBtn,3,1);
 
             cancelBtn=Btn("CANCEL",Color.FromArgb(255,236,238),Color.FromArgb(185,45,55));
@@ -141,4 +141,4 @@ erAsync();
 
         async Task LoadFolderAsync(string path)
         {
-            if(Pi
+            if

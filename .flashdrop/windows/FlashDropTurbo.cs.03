@@ -1,4 +1,4 @@
-n.Length!=6){SetStatus("Enter the 6-digit PIN shown on the phone.",true); return;}
+(Pin.Length!=6){SetStatus("Enter the 6-digit PIN shown on the phone.",true); return;}
             ToggleConnect(false);
             try
             {
@@ -134,4 +134,4 @@ n.Length!=6){SetStatus("Enter the 6-digit PIN shown on the phone.",true); return
                             {
                                 File.Delete(f.PartPath);
                                 partial=0;
-            
+        
