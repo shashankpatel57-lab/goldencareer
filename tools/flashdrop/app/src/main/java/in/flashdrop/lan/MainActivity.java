@@ -98,11 +98,11 @@ public class MainActivity extends Activity {
         brand.setLetterSpacing(.16f);
         hero.addView(brand);
 
-        TextView title = text("5 GHz Turbo Transfer", 29, Color.WHITE, true);
+        TextView title = text("Turbo 3 • Stable FTP Engine", 29, Color.WHITE, true);
         title.setPadding(0, dp(7), 0, 0);
         hero.addView(title);
 
-        TextView sub = text("Phone → Windows at local Wi-Fi speed. No internet, no cloud, no ZIP.", 14, Color.rgb(235, 252, 249), false);
+        TextView sub = text("OnePlus-friendly high-speed transfer over the same FTP path already proven in File Explorer.", 14, Color.rgb(235, 252, 249), false);
         sub.setPadding(0, dp(7), 0, 0);
         hero.addView(sub);
 
@@ -117,7 +117,7 @@ public class MainActivity extends Activity {
         serverStatus = text("Server stopped", 16, Color.rgb(86,96,116), true);
         status.addView(serverStatus);
 
-        TextView turboLabel = chip("⚡  TURBO WINDOWS APP", Color.rgb(238,235,255), Color.rgb(79,70,229));
+        TextView turboLabel = chip("⬇  WINDOWS TURBO 3 DOWNLOAD", Color.rgb(238,235,255), Color.rgb(79,70,229));
         turboLabel.setPadding(dp(10),dp(7),dp(10),dp(7));
         addTopGap(status,turboLabel,14);
 
@@ -129,7 +129,7 @@ public class MainActivity extends Activity {
         pinText.setPadding(0,dp(5),0,0);
         status.addView(pinText);
 
-        TextView explorerLabel = chip("📁  WINDOWS FILE EXPLORER", Color.rgb(231,249,245), Color.rgb(5,128,103));
+        TextView explorerLabel = chip("⚡  FTP / TURBO 3 ENGINE", Color.rgb(231,249,245), Color.rgb(5,128,103));
         addTopGap(status,explorerLabel,15);
         explorerAddress = text("ftp://—", 17, Color.rgb(22,94,78), true);
         explorerAddress.setPadding(0,dp(7),0,0);
@@ -154,24 +154,24 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams half2=new LinearLayout.LayoutParams(0,-2,1); half2.leftMargin=dp(4);
         actions.addView(copyTurbo,half1); actions.addView(copyFtp,half2);
 
-        TextView recTitle = sectionTitle("Recommended for very large transfers");
+        TextView recTitle = sectionTitle("Turbo 3 for large backups");
         addTopGap(root,recTitle,24);
 
         LinearLayout turboCard = card(Color.rgb(248,247,255), Color.rgb(218,214,255));
         root.addView(turboCard);
-        turboCard.addView(text("⚡ FlashDrop Turbo for Windows",20,Color.rgb(58,48,171),true));
-        TextView turboDesc=text("For 50–100 GB+ backups, use the Windows Turbo companion. It splits transfers into parallel HTTP byte ranges, preserves the complete folder tree, and avoids the sequential bottleneck of File Explorer FTP.",14,Color.rgb(70,78,103),false);
+        turboCard.addView(text("⚡ FlashDrop Turbo 3 for Windows",20,Color.rgb(58,48,171),true));
+        TextView turboDesc=text("Turbo 3 no longer uses private HTTP transfer APIs. It uses the same read-only FTP engine that already works in Windows File Explorer, but runs multiple persistent workers with resume support for much higher and more stable throughput.",14,Color.rgb(70,78,103),false);
         turboDesc.setPadding(0,dp(8),0,0); turboCard.addView(turboDesc);
         TextView target=chip("TARGET: 100 GB/hour ≈ 28 MB/s sustained",Color.rgb(235,250,246),Color.rgb(4,128,99));
         addTopGap(turboCard,target,12);
-        TextView steps=text("1. Connect PC to this phone's 5 GHz hotspot.\n2. Start FlashDrop.\n3. Open the HTTP address above in Edge/Chrome.\n4. Enter the PIN and click “Download FlashDrop Turbo for Windows”.\n5. Run it → Auto Detect → enter PIN → choose phone folder + PC folder → START TURBO COPY.",14,Color.rgb(50,61,85),false);
+        TextView steps=text("1. Connect PC to this phone's 5 GHz hotspot.\n2. Start FlashDrop.\n3. Open the HTTP address above only to download Turbo 3.\n4. Run Turbo 3 → Auto Detect. No Turbo PIN is required.\n5. Choose the phone folder + PC folder → START TURBO COPY.",14,Color.rgb(50,61,85),false);
         steps.setPadding(0,dp(12),0,0); turboCard.addView(steps);
 
         TextView expTitle=sectionTitle("Simple Explorer mode");
         addTopGap(root,expTitle,22);
         LinearLayout expCard=card(Color.rgb(246,252,250),Color.rgb(206,237,228)); root.addView(expCard);
         expCard.addView(text("📁 Copy folders directly in File Explorer",18,Color.rgb(10,105,85),true));
-        TextView exp=text("Open the FTP address above in Windows File Explorer. This remains the easiest method for normal copying. Turbo mode is recommended when maximum throughput matters.",14,Color.rgb(56,76,72),false);
+        TextView exp=text("Open the FTP address above in Windows File Explorer. This remains the easiest method for normal copying. Turbo 3 uses this same proven FTP service with multiple persistent workers for large backups.",14,Color.rgb(56,76,72),false);
         exp.setPadding(0,dp(8),0,0); expCard.addView(exp);
 
         TextView setupTitle=sectionTitle("Connection & storage");
@@ -186,7 +186,7 @@ public class MainActivity extends Activity {
         LinearLayout perf=card(Color.rgb(250,251,255),Color.rgb(229,232,244));
         LinearLayout.LayoutParams pp=new LinearLayout.LayoutParams(-1,-2); pp.topMargin=dp(14); root.addView(perf,pp);
         perf.addView(text("Performance profile",16,Color.rgb(34,47,75),true));
-        TextView perfText=text("• HTTP server: up to 32 sessions\n• Turbo companion: 2–16 parallel workers\n• Adjustable 8–256 MB range chunks\n• 2 MB server buffers + high-performance Wi-Fi lock\n• Resume-capable HTTP ranges\n• Read-only FTP mode for safety",13,Color.rgb(74,84,103),false);
+        TextView perfText=text("• Turbo 3 uses FTP only for transfer — no HTTP API endpoints\n• 1–8 persistent parallel workers\n• 1–8 MB sequential buffers\n• 4 MB Android file buffers + high-performance Wi-Fi lock\n• REST resume for interrupted files\n• Read-only FTP server for safety",13,Color.rgb(74,84,103),false);
         perfText.setPadding(0,dp(8),0,0); perf.addView(perfText);
 
         TextView limit=text("Actual speed depends on the phone's Wi-Fi chipset, hotspot link rate, storage read speed, laptop Wi-Fi, interference and file sizes. 100 GB/hour needs roughly 28 MB/s continuously, so it is a performance target rather than a guaranteed minimum.",12,Color.rgb(118,126,143),false);
