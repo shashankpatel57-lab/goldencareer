@@ -170,7 +170,7 @@ namespace FlashDropTurbo
 
         public MainForm()
         {
-            Text = "FlashDrop Turbo v1.8 - by Shashank Patel";
+            Text = "FlashDrop Turbo v2.0 - by Shashank Patel";
             StartPosition = FormStartPosition.CenterScreen;
             MinimumSize = new Size(1000, 720);
             Size = new Size(1180, 820);
@@ -233,3 +233,5 @@ namespace FlashDropTurbo
             grid.RowStyles.Add(new RowStyle(SizeType.Percent,100));
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,38));
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,100));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,105));
+ 

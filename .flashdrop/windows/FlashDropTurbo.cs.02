@@ -1,13 +1,9 @@
-ew ProgressBar {
-                Dock=DockStyle.Fill,
-                Style=ProgressBarStyle.Continuous,
-                Maximum=1000,
-                Margin=new Padding(0,3,0,5)
+in=new Padding(0,3,0,5)
             };
             bottom.SetColumnSpan(progress,3);
             bottom.Controls.Add(progress,0,0);
 
-            statusLabel=L("Ready. Adaptive Turbo v1.8 • automatically chooses the fastest compatible LAN path.",9.5f,Muted,false);
+            statusLabel=L("Ready. Unified Turbo v2.0 • one proven port • continuous multi-file streams.",9.5f,Muted,false);
             statusLabel.Dock=DockStyle.Fill;
             statusLabel.TextAlign=ContentAlignment.MiddleLeft;
             statusLabel.AutoEllipsis=true;
@@ -162,4 +158,12 @@ ew ProgressBar {
             return await Task.Run(()=>{
                 var req=(HttpWebRequest)WebRequest.Create(url); req.Method="GET"; req.Timeout=10000; req.ReadWriteTimeout=10000; req.Proxy=null; req.KeepAlive=true;
                 using(token.Register(()=>{try{req.Abort();}catch{}}))
-                using(var res=(HttpWebResponse)req.GetResponse()) using(var sr=new StreamReader(res.GetResponseStream(),Encoding.UTF8)) retur
+                using(var res=(HttpWebResponse)req.GetResponse()) using(var sr=new StreamReader(res.GetResponseStream(),Encoding.UTF8)) return sr.ReadToEnd();
+            },token);
+        }
+
+        async Task OpenSelectedAsync()
+        {
+            if(remoteList.SelectedItems.Count==0)return;
+            var x=remoteList.SelectedItems[0].Tag as PhoneItem;
+            if(x!

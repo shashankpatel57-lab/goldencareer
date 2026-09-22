@@ -1,5 +1,4 @@
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,105));
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,105));
+           grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,105));
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,88));
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,92));
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,20));
@@ -29,10 +28,10 @@
             connectBtn.Click += async (s,e) => await LoadFolderAsync(currentPath);
             grid.Controls.Add(connectBtn,3,1);
 
-            workersBox = Num(1,8,3);
+            workersBox = Num(1,6,3);
             grid.Controls.Add(workersBox,4,1);
 
-            chunkBox = Num(1,8,4);
+            chunkBox = Num(1,8,2);
             grid.Controls.Add(chunkBox,5,1);
 
             connectionLabel = L("Waiting for phone...",9.5f,Muted,true);
@@ -131,7 +130,7 @@
             destCard.Controls.Add(d);
 
             d.Controls.Add(L("DESTINATION ON THIS PC",9,Muted,true),0,0);
-            var turboNote=L("Adaptive Turbo • Raw TCP + automatic OnePlus compatibility fallback",8.8f,Muted,false);
+            var turboNote=L("Unified Turbo • continuous HTTP bundle lanes • OnePlus optimized",8.8f,Muted,false);
             turboNote.Dock=DockStyle.Fill;
             turboNote.TextAlign=ContentAlignment.MiddleRight;
             d.SetColumnSpan(turboNote,4);
@@ -173,4 +172,8 @@
             bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,235));
             outer.Controls.Add(bottom,0,4);
 
-            progress = n
+            progress = new ProgressBar {
+                Dock=DockStyle.Fill,
+                Style=ProgressBarStyle.Continuous,
+                Maximum=1000,
+                Marg

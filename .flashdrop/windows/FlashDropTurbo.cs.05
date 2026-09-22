@@ -1,122 +1,126 @@
-while(got<file.Size)
-                    {
-                        token.ThrowIfCancellationRequested();
+        if(string.IsNullOrEmpty(line))
+                            throw new IOException("Bundle stream ended unexpectedly");
 
-                        int n=await ReadWithTimeoutAsync(
-                            input,buf,0,(int)Math.Min(buf.Length,file.Size-got),token,15000);
+                        if(line=="DONE")break;
 
-                        if(n<=0)break;
+                        string[] p=line.Split('\t');
 
-                        await fs.WriteAsync(buf,0,n,token);
-                        got+=n;
-                        Interlocked.Add(ref completedBytes,n);
+                        if(p.Length>=3 && p[0]=="ERR")
+                        {
+                            int bad;
+                            if(int.TryParse(p[1],out bad) && bad>=0 && bad<files.Count)
+                                errors.Enqueue(files[bad].RemotePath+" : "+p[2]);
+
+                            continue;
+                        }
+
+                        if(p.Length<4 || p[0]!="FILE")
+                            throw new IOException("Invalid bundle frame: "+line);
+
+                        int index=int.Parse(p[1]);
+                        long remaining=long.Parse(p[2]);
+                        long size=long.Parse(p[3]);
+
+                        if(index<0 || index>=files.Count)
+                            throw new IOException("Invalid bundle file index");
+
+                        var file=files[index];
+                        long offset=size-remaining;
+
+                        int bufferBytes=(int)chunkBox.Value*1024*1024;
+                        bufferBytes=Math.Max(512*1024,Math.Min(8*1024*1024,bufferBytes));
+                        byte[] buf=new byte[bufferBytes];
+
+                        Directory.CreateDirectory(Path.GetDirectoryName(file.FinalPath));
+
+                        using(var fs=new FileStream(
+                            file.PartPath,
+                            FileMode.OpenOrCreate,
+                            FileAccess.Write,
+                            FileShare.Read,
+                            bufferBytes,
+                            FileOptions.SequentialScan | FileOptions.Asynchronous))
+                        {
+                            fs.Seek(offset,SeekOrigin.Begin);
+                            if(fs.Length!=offset)fs.SetLength(offset);
+
+                            long got=0;
+
+                            while(got<remaining)
+                            {
+                                token.ThrowIfCancellationRequested();
+
+                                int n=await ReadWithTimeoutAsync(
+                                    input,
+                                    buf,
+                                    0,
+                                    (int)Math.Min(buf.Length,remaining-got),
+                                    token,
+                                    20000);
+
+                                if(n<=0)
+                                    throw new IOException("Bundle file ended early");
+
+                                await fs.WriteAsync(buf,0,n,token);
+                                got+=n;
+                                Interlocked.Add(ref completedBytes,n);
+                            }
+                        }
+
+                        long localSize=File.Exists(file.PartPath)?new FileInfo(file.PartPath).Length:0;
+
+                        if(localSize!=file.Size)
+                            throw new IOException(
+                                "Incomplete local file "+localSize+"/"+file.Size+
+                                " for "+file.RemotePath);
+
+                        if(File.Exists(file.FinalPath))
+                            File.Delete(file.FinalPath);
+
+                        File.Move(file.PartPath,file.FinalPath);
+
+                        if(file.Modified>0)
+                        {
+                            try
+                            {
+                                File.SetLastWriteTime(
+                                    file.FinalPath,
+                                    DateTimeOffset.FromUnixTimeMilliseconds(file.Modified).LocalDateTime);
+                            }
+                            catch{}
+                        }
                     }
-
-                    if(got!=file.Size)
-                        throw new IOException("Compatibility transfer incomplete "+got+"/"+file.Size);
                 }
             }
         }
 
-        async Task DownloadFileTurboAsync(RemoteFile file,TurboSession session,CancellationToken token)
+        async Task<string> ReadAsciiLineWithTimeoutAsync(
+            Stream input,
+            CancellationToken token,
+            int timeoutMs)
         {
-            long offset=0;
+            var bytes=new List<byte>(128);
+            var one=new byte[1];
 
-            if(File.Exists(file.PartPath))
+            while(bytes.Count<8192)
             {
-                offset=new FileInfo(file.PartPath).Length;
+                int n=await ReadWithTimeoutAsync(input,one,0,1,token,timeoutMs);
 
-                if(offset<0 || offset>file.Size)
-                {
-                    File.Delete(file.PartPath);
-                    offset=0;
-                }
+                if(n<=0)break;
+                if(one[0]==10)break;
+                if(one[0]!=13)bytes.Add(one[0]);
             }
 
-            await session.SendGetAsync(file.RemotePath,offset,token);
-
-            NetworkStream ns=session.Stream;
-            string line=await ReadAsciiLineAsync(ns,token);
-
-            if(!line.StartsWith("OK "))
-                throw new IOException("Turbo server: "+line);
-
-            string[] p=line.Split(new[]{' '},StringSplitOptions.RemoveEmptyEntries);
-            long remaining=p.Length>1?long.Parse(p[1]):(file.Size-offset);
-
-            int bufferBytes=(int)chunkBox.Value*1024*1024;
-            bufferBytes=Math.Max(1024*1024,Math.Min(8*1024*1024,bufferBytes));
-
-            // 8 queued blocks per lane: at 4 MB and 3 workers this can absorb
-            // roughly 96 MB of brief Windows/disk scheduling pauses.
-            int queueDepth=8;
-            var free=new BlockingCollection<byte[]>(queueDepth);
-            var ready=new BlockingCollection<WriteBlock>(queueDepth);
-
-            for(int i=0;i<queueDepth;i++)
-                free.Add(new byte[bufferBytes]);
-
-            long gotFromNetwork=0;
-            Exception producerError=null;
-
-            var writer=Task.Run(()=>{
-                using(var fs=new FileStream(
-                    file.PartPath,
-                    FileMode.OpenOrCreate,
-                    FileAccess.Write,
-                    FileShare.Read,
-                    bufferBytes,
-                    FileOptions.SequentialScan))
-                {
-                    fs.Seek(offset,SeekOrigin.Begin);
-                    if(fs.Length!=offset)fs.SetLength(offset);
-
-                    foreach(var block in ready.GetConsumingEnumerable())
-                    {
-                        token.ThrowIfCancellationRequested();
-                        fs.Write(block.Buffer,0,block.Count);
-                        Interlocked.Add(ref completedBytes,block.Count);
-                        free.Add(block.Buffer);
-                    }
-                }
-            },token);
-
-            try
-            {
-                while(gotFromNetwork<remaining)
-                {
-                    token.ThrowIfCancellationRequested();
-
-                    byte[] buf=free.Take(token);
-                    int want=(int)Math.Min(buf.Length,remaining-gotFromNetwork);
-
-                    int n=await ReadWithTimeoutAsync(ns,buf,0,want,token,12000);
-
-                    if(n<=0)
-                    {
-                        free.Add(buf);
-                        break;
-                    }
-
-                    gotFromNetwork+=n;
-                    ready.Add(new WriteBlock{Buffer=buf,Count=n},token);
-                }
-            }
-            catch(Exception ex)
-            {
-                producerError=ex;
-            }
-
-            ready.CompleteAdding();
-            await writer;
-
-            if(producerError!=null)throw producerError;
-
-            if(gotFromNetwork!=remaining)
-                throw new IOException("Short read "+gotFromNetwork+"/"+remaining);
+            return Encoding.UTF8.GetString(bytes.ToArray());
         }
 
-        async Task<int> ReadWithTimeoutAsync(Stream input,byte[] buffer,int offset,int count,CancellationToken token,int timeoutMs)
+        async Task<int> ReadWithTimeoutAsync(
+            Stream input,
+            byte[] buffer,
+            int offset,
+            int count,
+            CancellationToken token,
+            int timeoutMs)
         {
             var readTask=input.ReadAsync(buffer,offset,count,token);
             var timeoutTask=Task.Delay(timeoutMs,token);
@@ -125,24 +129,12 @@ while(got<file.Size)
             if(finished!=readTask)
             {
                 token.ThrowIfCancellationRequested();
-                throw new IOException("No data received for "+(timeoutMs/1000)+" seconds; reconnecting and resuming.");
+                throw new IOException(
+                    "No data received for "+(timeoutMs/1000)+
+                    " seconds; reconnecting and resuming.");
             }
 
             return await readTask;
-        }
-
-        async Task<string> ReadAsciiLineAsync(Stream input,CancellationToken token)
-        {
-            var bytes=new List<byte>(128);
-            var one=new byte[1];
-            while(bytes.Count<4096)
-            {
-                int n=await input.ReadAsync(one,0,1,token);
-                if(n<=0)break;
-                if(one[0]==10)break;
-                if(one[0]!=13)bytes.Add(one[0]);
-            }
-            return Encoding.UTF8.GetString(bytes.ToArray());
         }
 
         void UpdateSpeed()

@@ -1,12 +1,4 @@
-n sr.ReadToEnd();
-            },token);
-        }
-
-        async Task OpenSelectedAsync()
-        {
-            if(remoteList.SelectedItems.Count==0)return;
-            var x=remoteList.SelectedItems[0].Tag as PhoneItem;
-            if(x!=null && x.dir) await LoadFolderAsync(x.path);
+=null && x.dir) await LoadFolderAsync(x.path);
         }
 
         async Task UpAsync()
@@ -45,19 +37,9 @@ n sr.ReadToEnd();
 
             try
             {
-                compatibilityFtpMode=false;
-                SetStatus("Testing direct Turbo path…",false);
-
-                try
-                {
-                    double link=await RunTurboBenchmarkAsync(8L*1024L*1024L,token);
-                    SetStatus("Raw Turbo available: "+link.ToString("0.0")+" MB/s. Scanning selected phone folder…",false);
-                }
-                catch(Exception)
-                {
-                    compatibilityFtpMode=true;
-                    SetStatus("OnePlus / compatibility mode selected automatically. Using parallel local FTP Turbo path…",false);
-                }
+                SetStatus("Testing the same HTTP path used for browsing…",false);
+                double link=await RunHttpBenchmarkAsync(16L*1024L*1024L,token);
+                SetStatus("Unified LAN path: "+link.ToString("0.0")+" MB/s. Scanning selected phone folder…",false);
 
                 var remoteRoot=currentPath??"";
                 string rootName=string.IsNullOrEmpty(remoteRoot)?"PhoneBackup":Sanitize(RemoteLeaf(remoteRoot));
@@ -68,11 +50,15 @@ n sr.ReadToEnd();
                 await BuildManifestAsync(remoteRoot,"",destination,files,token);
                 totalBytes=files.Sum(f=>f.Size);
                 totalLabel.Text=files.Count+" files • "+FormatBytes(totalBytes);
-                if(files.Count==0){SetStatus("No readable files found in this folder.",true);return;}
 
-                int workers=(int)workersBox.Value;
-                var jobs=new ConcurrentQueue<RemoteFile>();
+                if(files.Count==0)
+                {
+                    SetStatus("No readable files found in this folder.",true);
+                    return;
+                }
+
                 long alreadyDone=0;
+                var pending=new List<RemoteFile>();
 
                 foreach(var f in files)
                 {
@@ -92,11 +78,13 @@ n sr.ReadToEnd();
                     }
 
                     long partial=0;
+
                     try
                     {
                         if(File.Exists(f.PartPath))
                         {
                             partial=new FileInfo(f.PartPath).Length;
+
                             if(partial<0 || partial>f.Size)
                             {
                                 File.Delete(f.PartPath);
@@ -110,15 +98,32 @@ n sr.ReadToEnd();
                     }
 
                     alreadyDone+=partial;
-                    jobs.Enqueue(f);
+                    pending.Add(f);
                 }
 
                 Interlocked.Exchange(ref completedBytes,alreadyDone);
-                if(jobs.IsEmpty)
+
+                if(pending.Count==0)
                 {
                     SetStatus("Everything is already present at the destination.",false);
                     progress.Value=1000;
                     return;
+                }
+
+                int laneCount=Math.Max(1,Math.Min((int)workersBox.Value,pending.Count));
+                var lanes=new List<List<RemoteFile>>();
+                var laneLoads=new long[laneCount];
+
+                for(int i=0;i<laneCount;i++)lanes.Add(new List<RemoteFile>());
+
+                foreach(var f in pending.OrderByDescending(x=>RemainingBytes(x)))
+                {
+                    int best=0;
+                    for(int i=1;i<laneCount;i++)
+                        if(laneLoads[i]<laneLoads[best])best=i;
+
+                    lanes[best].Add(f);
+                    laneLoads[best]+=RemainingBytes(f);
                 }
 
                 transferWatch=Stopwatch.StartNew();
@@ -128,63 +133,83 @@ n sr.ReadToEnd();
                 speedTimer.Start();
 
                 SetStatus(
-                    compatibilityFtpMode
-                        ? "Compatibility Turbo running — "+workers+" parallel FTP lanes • resume enabled."
-                        : "Adaptive Turbo v1.8 running — "+workers+" persistent raw lanes • RAM write-ahead buffering.",
+                    "Unified Turbo v2.0 running — "+laneCount+
+                    " continuous HTTP bundle lanes on "+new Uri(BaseUrl).Port+
+                    " • no per-file reconnects.",
                     false);
 
                 var errors=new ConcurrentQueue<string>();
                 var tasks=new List<Task>();
 
-                for(int i=0;i<workers;i++)
+                foreach(var lane in lanes)
                 {
+                    var captured=lane;
                     tasks.Add(Task.Run(async()=>{
-                        using(var session=new TurboSession(TurboHost,TurboPort,Pin))
+                        try
                         {
-                            RemoteFile file;
+                            await DownloadBundleLaneAsync(captured,token,errors);
+                        }
+                        catch(OperationCanceledException){throw;}
+                        catch(Exception ex)
+                        {
+                            errors.Enqueue("Lane stopped: "+ex.Message);
+                        }
+                    },token));
+                }
 
-                            while(!token.IsCancellationRequested && jobs.TryDequeue(out file))
-                            {
-                                bool ok=false;
-                                Exception last=null;
+                await Task.WhenAll(tasks);
+                token.ThrowIfCancellationRequested();
 
-                                for(int attempt=1;attempt<=4 && !ok && !token.IsCancellationRequested;attempt++)
-                                {
-                                    try
-                                    {
-                                        if(compatibilityFtpMode)
-                                            await DownloadFileFtpAsync(file,token);
-                                        else
-                                            await DownloadFileTurboAsync(file,session,token);
-                                        ok=true;
-                                    }
-                                    catch(Exception ex)
-                                    {
-                                        last=ex;
-                                        session.Close();
-                                        Thread.Sleep(250*attempt);
-                                    }
-                                }
+                long finished=files.Sum(f=>
+                    File.Exists(f.FinalPath) && new FileInfo(f.FinalPath).Length==f.Size ? f.Size :
+                    (File.Exists(f.PartPath)?Math.Min(f.Size,new FileInfo(f.PartPath).Length):0));
 
-                                if(!ok)
-                                {
-                                    errors.Enqueue(file.RemotePath+" : "+(last==null?"transfer failed":last.Message));
-                                    continue;
-                                }
+                Interlocked.Exchange(ref completedBytes,finished);
+                UpdateSpeed();
 
-                                try
-                                {
-                                    long got=File.Exists(file.PartPath)?new FileInfo(file.PartPath).Length:0;
-                                    if(got!=file.Size)throw new IOException("Incomplete file "+got+"/"+file.Size);
+                if(errors.IsEmpty && finished>=totalBytes)
+                {
+                    progress.Value=1000;
+                    SetStatus("DONE — "+files.Count+" files copied to "+destination,false);
+                }
+                else
+                {
+                    SetStatus(
+                        "Transfer finished with "+errors.Count+
+                        " issue(s). Partial files are preserved; press Start again to resume. "+
+                        (errors.IsEmpty?"":errors.FirstOrDefault()),
+                        true);
+                }
+            }
+            catch(OperationCanceledException)
+            {
+                SetStatus("Transfer cancelled. Partial files are kept and will resume next time.",true);
+            }
+            catch(Exception ex)
+            {
+                SetStatus("Transfer stopped: "+ex.Message+"  Partial files are preserved for resume.",true);
+            }
+            finally
+            {
+                speedTimer.Stop();
+                if(transferWatch!=null)transferWatch.Stop();
+                cts.Dispose();
+                cts=null;
+                startBtn.Enabled=true;
+                cancelBtn.Enabled=false;
+                ToggleConnect(true);
+            }
+        }
 
-                                    if(File.Exists(file.FinalPath))File.Delete(file.FinalPath);
-                                    File.Move(file.PartPath,file.FinalPath);
+        long RemainingBytes(RemoteFile f)
+        {
+            if(File.Exists(f.FinalPath) && new FileInfo(f.FinalPath).Length==f.Size)return 0;
 
-                                    if(file.Modified>0)
-                                        File.SetLastWriteTime(
-                                            file.FinalPath,
-                                            DateTimeOffset.FromUnixTimeMilliseconds(file.Modified).LocalDateTime);
-                                }
-                                catch(Exception ex)
-                                {
- 
+            long partial=0;
+            try
+            {
+                if(File.Exists(f.PartPath))partial=Math.Min(f.Size,new FileInfo(f.PartPath).Length);
+            }
+            catch{}
+
+            re
