@@ -1,4 +1,61 @@
-eady += f.Size;
+    {
+                    SetStatus("Connect to the phone first.", true);
+                    return;
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(localBox.Text))
+            {
+                SetStatus("Choose a destination folder.", true);
+                return;
+            }
+
+            transferCts = new CancellationTokenSource();
+            var token = transferCts.Token;
+            startBtn.Enabled = false;
+            cancelBtn.Enabled = true;
+            ToggleConnect(false);
+            progress.Value = 0;
+            completedBytes = 0;
+            totalBytes = 0;
+            smoothedMbps = 0;
+
+            try
+            {
+                SetStatus("Scanning phone folder over FTP...", false);
+
+                string rootName = currentPath == "/" ? "PhoneBackup" : CompactComponent(RemoteLeaf(currentPath), 72);
+                string destRoot = Path.Combine(localBox.Text, rootName);
+                Directory.CreateDirectory(destRoot);
+
+                var files = new List<RemoteFile>();
+
+                using (var scan = new FtpSession(endpoint.Host, endpoint.Port))
+                {
+                    await scan.ConnectAsync(token);
+                    await BuildManifestAsync(scan, currentPath, "", destRoot, files, token);
+                }
+
+                totalBytes = files.Sum(f => f.Size);
+                totalLabel.Text = files.Count + " files • " + FormatBytes(totalBytes);
+
+                var queue = new ConcurrentQueue<RemoteFile>();
+                long already = 0;
+
+                foreach (var f in files)
+                {
+                    token.ThrowIfCancellationRequested();
+                    Directory.CreateDirectory(Path.GetDirectoryName(f.FinalPath));
+
+                    if (f.Size == 0)
+                    {
+                        if (!File.Exists(f.FinalPath)) File.WriteAllBytes(f.FinalPath, new byte[0]);
+                        continue;
+                    }
+
+                    if (File.Exists(f.FinalPath) && new FileInfo(f.FinalPath).Length == f.Size)
+                    {
+                        already += f.Size;
                         continue;
                     }
 
@@ -25,8 +82,9 @@ eady += f.Size;
                 bufferBytes = Math.Max(512 * 1024, Math.Min(8 * 1024 * 1024, bufferBytes));
 
                 SetStatus(
-                    "Turbo 3 running — " + workers +
-                    " persistent FTP workers • automatic resume • no HTTP API calls.",
+                    "Turbo 3.1 running — " + workers +
+                    " persistent XFD1 streams on FTP port " + endpoint.Port +
+                    " • no per-file reconnects.",
                     false);
 
                 var errors = new ConcurrentQueue<string>();
@@ -53,7 +111,7 @@ eady += f.Size;
                                     {
                                         if (ftp == null)
                                         {
-                                            ftp = new FtpSession(endpoint.Host, endpoint.Port);
+                                            ftp = new FtpSession(endpoint.Host, endpoint.Port, true);
                                             await ftp.ConnectAsync(token);
                                         }
 
@@ -212,38 +270,4 @@ eady += f.Size;
             if (size != file.Size) throw new IOException("Incomplete local file " + size + "/" + file.Size);
 
             if (File.Exists(file.FinalPath)) File.Delete(file.FinalPath);
-            File.Move(file.PartPath, file.FinalPath);
-
-            if (file.ModifiedUtc != DateTime.MinValue)
-            {
-                try { File.SetLastWriteTimeUtc(file.FinalPath, file.ModifiedUtc); } catch { }
-            }
-        }
-
-        long SafePartLength(RemoteFile f)
-        {
-            try
-            {
-                if (!File.Exists(f.PartPath)) return 0;
-                long n = new FileInfo(f.PartPath).Length;
-
-                if (n < 0 || n > f.Size)
-                {
-                    File.Delete(f.PartPath);
-                    return 0;
-                }
-
-                return n;
-            }
-            catch { return 0; }
-        }
-
-        void UpdateSpeed()
-        {
-            long nowBytes = Interlocked.Read(ref completedBytes);
-            DateTime now = DateTime.UtcNow;
-            double seconds = Math.Max(0.001, (now - speedSampleAt).TotalSeconds);
-            long delta = Math.Max(0, nowBytes - speedSampleBytes);
-            double instant = delta / 1048576d / seconds;
-
-            smoothedMbps = smoothedMbps <= 0 ? instant : smoothedMbps * 0.55 + instant * 0.45;
+            File.Move(file.PartPath, file.Fin

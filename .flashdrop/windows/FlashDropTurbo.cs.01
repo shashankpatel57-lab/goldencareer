@@ -1,10 +1,145 @@
-Task<FtpResponse> ReadResponseAsync(int timeoutMs, CancellationToken token)
+": " + start.Text);
+
+                data.ReceiveBufferSize = 4 * 1024 * 1024;
+                data.NoDelay = true;
+
+                EnsureTransferBuffer(bufferBytes);
+
+                Directory.CreateDirectory(Path.GetDirectoryName(localPartPath));
+
+                using (var fs = new FileStream(
+                    localPartPath,
+                    FileMode.OpenOrCreate,
+                    FileAccess.Write,
+                    FileShare.Read,
+                    bufferBytes,
+                    FileOptions.SequentialScan))
+                {
+                    fs.Seek(offset, SeekOrigin.Begin);
+
+                    if (fs.Length != offset)
+                        fs.SetLength(offset);
+
+                    long got = offset;
+                    Stream input = data.GetStream();
+
+                    while (got < expectedSize)
+                    {
+                        token.ThrowIfCancellationRequested();
+
+                        int want = (int)Math.Min(transferBuffer.Length, expectedSize - got);
+                        int n = await ReadWithTimeoutAsync(
+                            input,
+                            transferBuffer,
+                            0,
+                            want,
+                            20000,
+                            token);
+
+                        if (n <= 0) break;
+
+                        fs.Write(transferBuffer, 0, n);
+                        got += n;
+
+                        if (onBytes != null)
+                            onBytes(n);
+                    }
+
+                    if (got != expectedSize)
+                        throw new IOException("Incomplete FTP file: " + got + " / " + expectedSize);
+                }
+
+                data.Close();
+
+                var finish = await ReadResponseAsync(12000, token);
+
+                if (finish.Code != 226 && finish.Code != 250)
+                    throw new IOException("FTP transfer did not finish: " + finish.Text);
+            }
+        }
+
+        void EnsureTransferBuffer(int bufferBytes)
         {
-            string first = await ReadLineWithTimeoutAsync(reader, timeoutMs, token);
-            if (string.IsNullOrEmpty(first)) throw new IOException("FTP control connection closed");
-            if (first.Length < 3) throw new IOException("Invalid FTP response: " + first);
+            int size = Math.Max(512 * 1024, Math.Min(8 * 1024 * 1024, bufferBytes));
+
+            if (transferBuffer == null || transferBuffer.Length != size)
+                transferBuffer = new byte[size];
+        }
+
+        async Task<TcpClient> OpenPassiveAsync(CancellationToken token)
+        {
+            var epsv = await CommandAsync("EPSV", token);
+            int dataPort = 0;
+
+            if (epsv.Code == 229)
+            {
+                int a = epsv.Text.IndexOf("(|||", StringComparison.Ordinal);
+                int b = a >= 0
+                    ? epsv.Text.IndexOf("|)", a + 4, StringComparison.Ordinal)
+                    : -1;
+
+                if (a >= 0 && b > a)
+                {
+                    string p = epsv.Text.Substring(a + 4, b - (a + 4));
+                    int.TryParse(p, out dataPort);
+                }
+            }
+
+            if (dataPort <= 0)
+            {
+                var pasv = await CommandAsync("PASV", token);
+                Expect(pasv, 227);
+
+                int l = pasv.Text.IndexOf('(');
+                int r = pasv.Text.IndexOf(')', l + 1);
+
+                if (l < 0 || r <= l)
+                    throw new IOException("Invalid PASV response");
+
+                string[] v = pasv.Text.Substring(l + 1, r - l - 1).Split(',');
+
+                if (v.Length != 6)
+                    throw new IOException("Invalid PASV response");
+
+                int p1, p2;
+
+                if (!int.TryParse(v[4], out p1) ||
+                    !int.TryParse(v[5], out p2))
+                    throw new IOException("Invalid PASV port");
+
+                dataPort = p1 * 256 + p2;
+            }
+
+            var data = new TcpClient();
+            data.NoDelay = true;
+            data.ReceiveBufferSize = 4 * 1024 * 1024;
+
+            await ConnectTcpAsync(data, host, dataPort, 6000, token);
+            return data;
+        }
+
+        async Task<FtpResponse> CommandAsync(string command, CancellationToken token)
+        {
+            EnsureConnected();
+
+            await writer.WriteLineAsync(command);
+            await writer.FlushAsync();
+
+            return await ReadResponseAsync(12000, token);
+        }
+
+        async Task<FtpResponse> ReadResponseAsync(int timeoutMs, CancellationToken token)
+        {
+            string first = await ReadLineRawAsync(stream, timeoutMs, token);
+
+            if (string.IsNullOrEmpty(first))
+                throw new IOException("FTP control connection closed");
+
+            if (first.Length < 3)
+                throw new IOException("Invalid FTP response: " + first);
 
             int code;
+
             if (!int.TryParse(first.Substring(0, 3), out code))
                 throw new IOException("Invalid FTP response: " + first);
 
@@ -12,56 +147,92 @@ Task<FtpResponse> ReadResponseAsync(int timeoutMs, CancellationToken token)
 
             if (first.Length > 3 && first[3] == '-')
             {
-                string terminator = code.ToString(CultureInfo.InvariantCulture) + " ";
+                string terminator =
+                    code.ToString(CultureInfo.InvariantCulture) + " ";
 
                 while (true)
                 {
-                    string line = await ReadLineWithTimeoutAsync(reader, timeoutMs, token);
-                    if (line == null) throw new IOException("FTP control connection closed");
+                    string line = await ReadLineRawAsync(stream, timeoutMs, token);
+
+                    if (line == null)
+                        throw new IOException("FTP control connection closed");
+
                     all.Append("\n").Append(line);
-                    if (line.StartsWith(terminator, StringComparison.Ordinal)) break;
+
+                    if (line.StartsWith(terminator, StringComparison.Ordinal))
+                        break;
                 }
             }
 
             return new FtpResponse { Code = code, Text = all.ToString() };
         }
 
-        static async Task<string> ReadLineWithTimeoutAsync(StreamReader r, int timeoutMs, CancellationToken token)
+        static async Task<string> ReadLineRawAsync(
+            Stream input,
+            int timeoutMs,
+            CancellationToken token)
         {
-            var task = r.ReadLineAsync();
-            var winner = await Task.WhenAny(task, Task.Delay(timeoutMs, token));
-            if (winner != task)
+            var bytes = new List<byte>(128);
+            byte[] one = new byte[1];
+
+            while (bytes.Count < 64 * 1024)
             {
-                token.ThrowIfCancellationRequested();
-                throw new IOException("FTP control timed out");
+                int n = await ReadWithTimeoutAsync(
+                    input, one, 0, 1, timeoutMs, token);
+
+                if (n <= 0)
+                {
+                    if (bytes.Count == 0) return null;
+                    break;
+                }
+
+                if (one[0] == 10) break;
+                if (one[0] != 13) bytes.Add(one[0]);
             }
-            return await task;
+
+            return Encoding.UTF8.GetString(bytes.ToArray());
         }
 
         static async Task<int> ReadWithTimeoutAsync(
-            Stream input, byte[] buffer, int offset, int count, int timeoutMs, CancellationToken token)
+            Stream input,
+            byte[] buffer,
+            int offset,
+            int count,
+            int timeoutMs,
+            CancellationToken token)
         {
             var task = input.ReadAsync(buffer, offset, count, token);
             var winner = await Task.WhenAny(task, Task.Delay(timeoutMs, token));
+
             if (winner != task)
             {
                 token.ThrowIfCancellationRequested();
-                throw new IOException("No file data received for " + (timeoutMs / 1000) + " seconds");
+                throw new IOException(
+                    "No data received for " +
+                    (timeoutMs / 1000) +
+                    " seconds");
             }
+
             return await task;
         }
 
         static async Task ConnectTcpAsync(
-            TcpClient client, string host, int port, int timeoutMs, CancellationToken token)
+            TcpClient client,
+            string host,
+            int port,
+            int timeoutMs,
+            CancellationToken token)
         {
             var task = client.ConnectAsync(host, port);
             var winner = await Task.WhenAny(task, Task.Delay(timeoutMs, token));
+
             if (winner != task)
             {
                 try { client.Close(); } catch { }
                 token.ThrowIfCancellationRequested();
                 throw new IOException("Connection timed out");
             }
+
             await task;
         }
 
@@ -76,6 +247,7 @@ Task<FtpResponse> ReadResponseAsync(int timeoutMs, CancellationToken token)
                 while ((line = sr.ReadLine()) != null)
                 {
                     line = line.TrimEnd('\r', '\n');
+
                     if (line.Length == 0) continue;
 
                     int space = line.IndexOf(' ');
@@ -83,13 +255,16 @@ Task<FtpResponse> ReadResponseAsync(int timeoutMs, CancellationToken token)
 
                     string facts = line.Substring(0, space);
                     string name = line.Substring(space + 1);
-                    if (name.Length == 0 || name == "." || name == "..") continue;
+
+                    if (name.Length == 0 || name == "." || name == "..")
+                        continue;
 
                     bool dir = false;
                     long size = 0;
                     DateTime modified = DateTime.MinValue;
 
                     string[] fs = facts.Split(';');
+
                     foreach (string f in fs)
                     {
                         int eq = f.IndexOf('=');
@@ -98,14 +273,25 @@ Task<FtpResponse> ReadResponseAsync(int timeoutMs, CancellationToken token)
                         string key = f.Substring(0, eq).Trim().ToLowerInvariant();
                         string val = f.Substring(eq + 1).Trim();
 
-                        if (key == "type") dir = val.Equals("dir", StringComparison.OrdinalIgnoreCase);
-                        else if (key == "size") long.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out size);
+                        if (key == "type")
+                            dir = val.Equals("dir", StringComparison.OrdinalIgnoreCase);
+                        else if (key == "size")
+                            long.TryParse(
+                                val,
+                                NumberStyles.Integer,
+                                CultureInfo.InvariantCulture,
+                                out size);
                         else if (key == "modify")
                         {
                             DateTime dt;
+
                             if (DateTime.TryParseExact(
-                                val, "yyyyMMddHHmmss", CultureInfo.InvariantCulture,
-                                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out dt))
+                                val,
+                                "yyyyMMddHHmmss",
+                                CultureInfo.InvariantCulture,
+                                DateTimeStyles.AssumeUniversal |
+                                DateTimeStyles.AdjustToUniversal,
+                                out dt))
                                 modified = dt;
                         }
                     }
@@ -123,124 +309,4 @@ Task<FtpResponse> ReadResponseAsync(int timeoutMs, CancellationToken token)
 
             items.Sort((a, b) =>
             {
-                if (a.IsDirectory != b.IsDirectory) return a.IsDirectory ? -1 : 1;
-                return string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
-            });
-
-            return items;
-        }
-
-        static string CombineRemote(string parent, string name)
-        {
-            string p = NormalizeRemote(parent);
-            if (p == "/") return "/" + name;
-            return p.TrimEnd('/') + "/" + name;
-        }
-
-        static string NormalizeRemote(string p)
-        {
-            p = (p ?? "/").Replace('\\', '/');
-            if (!p.StartsWith("/")) p = "/" + p;
-            while (p.Contains("//")) p = p.Replace("//", "/");
-            return p;
-        }
-
-        static void Expect(FtpResponse r, int code)
-        {
-            if (r.Code != code) throw new IOException("FTP " + code + " expected, got: " + r.Text);
-        }
-
-        void EnsureConnected()
-        {
-            if (control == null || reader == null || writer == null || !control.Connected)
-                throw new IOException("FTP session is not connected");
-        }
-
-        void DisposeControl()
-        {
-            try { if (writer != null) writer.Dispose(); } catch { }
-            try { if (reader != null) reader.Dispose(); } catch { }
-            try { if (control != null) control.Close(); } catch { }
-            writer = null;
-            reader = null;
-            control = null;
-        }
-
-        public void Dispose()
-        {
-            try
-            {
-                if (writer != null)
-                {
-                    writer.WriteLine("QUIT");
-                    writer.Flush();
-                }
-            }
-            catch { }
-
-            DisposeControl();
-        }
-    }
-
-    sealed class MainForm : Form
-    {
-        readonly Color Ink = Color.FromArgb(18, 29, 51);
-        readonly Color Muted = Color.FromArgb(100, 110, 130);
-        readonly Color Blue = Color.FromArgb(73, 63, 240);
-        readonly Color Green = Color.FromArgb(0, 148, 120);
-        readonly Color Bg = Color.FromArgb(245, 247, 252);
-
-        TextBox addressBox, localBox;
-        Label connectionLabel, pathLabel, statusLabel, speedLabel, totalLabel;
-        ListView remoteList;
-        Button detectBtn, connectBtn, upBtn, refreshBtn, browseBtn, openBtn, startBtn, cancelBtn;
-        NumericUpDown workersBox, bufferBox;
-        ProgressBar progress;
-
-        FtpEndpoint endpoint;
-        string currentPath = "/";
-        CancellationTokenSource transferCts;
-
-        long totalBytes;
-        long completedBytes;
-        long speedSampleBytes;
-        DateTime speedSampleAt;
-        double smoothedMbps;
-        System.Windows.Forms.Timer speedTimer;
-
-        public MainForm()
-        {
-            Text = "FlashDrop Turbo v3.0 - FTP Engine - by Shashank Patel";
-            StartPosition = FormStartPosition.CenterScreen;
-            MinimumSize = new Size(1000, 720);
-            Size = new Size(1180, 820);
-            BackColor = Bg;
-            Font = new Font("Segoe UI", 9.5f);
-            Icon = SystemIcons.Shield;
-            AutoScaleMode = AutoScaleMode.Dpi;
-            BuildUi();
-            Shown += async (s, e) => await AutoDetectAsync();
-        }
-
-        void BuildUi()
-        {
-            var outer = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                ColumnCount = 1,
-                RowCount = 5,
-                BackColor = Bg,
-                Padding = new Padding(18, 14, 18, 14)
-            };
-
-            outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 108));
-            outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 126));
-            outer.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 120));
-            outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 96));
-            Controls.Add(outer);
-
-            var hero = new HeroPanel { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 10) };
-            outer.Controls.Add(hero, 0, 0);
-
-  
+                if (a.IsDirecto

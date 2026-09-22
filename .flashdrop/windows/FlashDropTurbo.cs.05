@@ -1,3 +1,38 @@
+alPath);
+
+            if (file.ModifiedUtc != DateTime.MinValue)
+            {
+                try { File.SetLastWriteTimeUtc(file.FinalPath, file.ModifiedUtc); } catch { }
+            }
+        }
+
+        long SafePartLength(RemoteFile f)
+        {
+            try
+            {
+                if (!File.Exists(f.PartPath)) return 0;
+                long n = new FileInfo(f.PartPath).Length;
+
+                if (n < 0 || n > f.Size)
+                {
+                    File.Delete(f.PartPath);
+                    return 0;
+                }
+
+                return n;
+            }
+            catch { return 0; }
+        }
+
+        void UpdateSpeed()
+        {
+            long nowBytes = Interlocked.Read(ref completedBytes);
+            DateTime now = DateTime.UtcNow;
+            double seconds = Math.Max(0.001, (now - speedSampleAt).TotalSeconds);
+            long delta = Math.Max(0, nowBytes - speedSampleBytes);
+            double instant = delta / 1048576d / seconds;
+
+            smoothedMbps = smoothedMbps <= 0 ? instant : smoothedMbps * 0.65 + instant * 0.35;
             speedSampleBytes = nowBytes;
             speedSampleAt = now;
 

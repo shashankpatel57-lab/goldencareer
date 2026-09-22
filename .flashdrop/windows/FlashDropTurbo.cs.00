@@ -76,15 +76,22 @@ namespace FlashDropTurbo
     {
         readonly string host;
         readonly int port;
-        TcpClient control;
-        StreamReader reader;
-        StreamWriter writer;
+        readonly bool preferTurbo;
 
-        public FtpSession(string host, int port)
+        TcpClient control;
+        NetworkStream stream;
+        StreamWriter writer;
+        bool turboActive;
+        byte[] transferBuffer;
+
+        public FtpSession(string host, int port, bool preferTurbo)
         {
             this.host = host;
             this.port = port;
+            this.preferTurbo = preferTurbo;
         }
+
+        public bool TurboActive { get { return turboActive; } }
 
         public async Task ConnectAsync(CancellationToken token)
         {
@@ -92,13 +99,16 @@ namespace FlashDropTurbo
 
             control = new TcpClient();
             control.NoDelay = true;
-            control.ReceiveBufferSize = 256 * 1024;
-            control.SendBufferSize = 256 * 1024;
+            control.ReceiveBufferSize = 4 * 1024 * 1024;
+            control.SendBufferSize = 1024 * 1024;
 
             await ConnectTcpAsync(control, host, port, 6000, token);
 
-            reader = new StreamReader(control.GetStream(), new UTF8Encoding(false), false, 16 * 1024);
-            writer = new StreamWriter(control.GetStream(), new UTF8Encoding(false), 16 * 1024);
+            stream = control.GetStream();
+            stream.ReadTimeout = 30000;
+            stream.WriteTimeout = 30000;
+
+            writer = new StreamWriter(stream, new UTF8Encoding(false), 16 * 1024);
             writer.NewLine = "\r\n";
             writer.AutoFlush = true;
 
@@ -106,7 +116,8 @@ namespace FlashDropTurbo
             Expect(hello, 220);
 
             var u = await CommandAsync("USER flashdrop", token);
-            if (u.Code != 230 && u.Code != 331) throw new IOException("FTP login failed: " + u.Text);
+            if (u.Code != 230 && u.Code != 331)
+                throw new IOException("FTP login failed: " + u.Text);
 
             if (u.Code == 331)
             {
@@ -119,33 +130,51 @@ namespace FlashDropTurbo
 
             var t = await CommandAsync("TYPE I", token);
             Expect(t, 200);
+
+            turboActive = false;
+
+            if (preferTurbo)
+            {
+                var x = await CommandAsync("XFD1", token);
+                if (x.Code == 200)
+                    turboActive = true;
+            }
         }
 
         public async Task<List<FtpItem>> ListAsync(string remotePath, CancellationToken token)
         {
             EnsureConnected();
 
+            if (turboActive)
+                throw new IOException("Folder listing is not available inside Turbo stream mode");
+
             using (var data = await OpenPassiveAsync(token))
             {
                 string path = NormalizeRemote(remotePath);
                 var start = await CommandAsync("MLSD " + path, token);
+
                 if (start.Code != 150 && start.Code != 125)
                     throw new IOException("Cannot list " + path + ": " + start.Text);
 
                 string text;
+
                 using (var sr = new StreamReader(data.GetStream(), new UTF8Encoding(false), false, 64 * 1024))
                 {
                     var readTask = sr.ReadToEndAsync();
                     var winner = await Task.WhenAny(readTask, Task.Delay(20000, token));
-                    if (winner != readTask) throw new IOException("FTP folder listing timed out");
+
+                    if (winner != readTask)
+                        throw new IOException("FTP folder listing timed out");
+
                     text = await readTask;
                 }
 
                 data.Close();
 
-                var end = await ReadResponseAsync(10000, token);
-                if (end.Code != 226 && end.Code != 250)
-                    throw new IOException("FTP list did not finish: " + end.Text);
+                var finish = await ReadResponseAsync(10000, token);
+
+                if (finish.Code != 226 && finish.Code != 250)
+                    throw new IOException("FTP list did not finish: " + finish.Text);
 
                 return ParseMlsd(text, path);
             }
@@ -162,114 +191,141 @@ namespace FlashDropTurbo
         {
             EnsureConnected();
 
+            if (turboActive)
+            {
+                await DownloadPersistentTurboAsync(
+                    remotePath,
+                    localPartPath,
+                    expectedSize,
+                    offset,
+                    bufferBytes,
+                    token,
+                    onBytes);
+                return;
+            }
+
+            await DownloadStandardFtpAsync(
+                remotePath,
+                localPartPath,
+                expectedSize,
+                offset,
+                bufferBytes,
+                token,
+                onBytes);
+        }
+
+        async Task DownloadPersistentTurboAsync(
+            string remotePath,
+            string localPartPath,
+            long expectedSize,
+            long offset,
+            int bufferBytes,
+            CancellationToken token,
+            Action<int> onBytes)
+        {
+            string encoded = Convert.ToBase64String(
+                Encoding.UTF8.GetBytes(NormalizeRemote(remotePath)));
+
+            await writer.WriteLineAsync(
+                "GET " +
+                offset.ToString(CultureInfo.InvariantCulture) +
+                " 0 " +
+                encoded);
+            await writer.FlushAsync();
+
+            var start = await ReadResponseAsync(15000, token);
+
+            if (start.Code != 150)
+                throw new IOException("Turbo GET failed: " + start.Text);
+
+            string[] p = start.Text.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+
+            if (p.Length < 3)
+                throw new IOException("Invalid Turbo header: " + start.Text);
+
+            long length;
+            long total;
+
+            if (!long.TryParse(p[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out length) ||
+                !long.TryParse(p[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out total))
+                throw new IOException("Invalid Turbo file size header");
+
+            if (total != expectedSize)
+                throw new IOException("Phone file size changed: " + total + " / " + expectedSize);
+
+            if (offset + length != expectedSize)
+                throw new IOException("Unexpected Turbo range length");
+
+            EnsureTransferBuffer(bufferBytes);
+
+            Directory.CreateDirectory(Path.GetDirectoryName(localPartPath));
+
+            using (var fs = new FileStream(
+                localPartPath,
+                FileMode.OpenOrCreate,
+                FileAccess.Write,
+                FileShare.Read,
+                bufferBytes,
+                FileOptions.SequentialScan))
+            {
+                fs.Seek(offset, SeekOrigin.Begin);
+
+                if (fs.Length != offset)
+                    fs.SetLength(offset);
+
+                long got = 0;
+
+                while (got < length)
+                {
+                    token.ThrowIfCancellationRequested();
+
+                    int want = (int)Math.Min(transferBuffer.Length, length - got);
+                    int n = await ReadWithTimeoutAsync(
+                        stream,
+                        transferBuffer,
+                        0,
+                        want,
+                        20000,
+                        token);
+
+                    if (n <= 0)
+                        throw new IOException("Turbo stream closed early");
+
+                    fs.Write(transferBuffer, 0, n);
+                    got += n;
+
+                    if (onBytes != null)
+                        onBytes(n);
+                }
+            }
+
+            var finish = await ReadResponseAsync(12000, token);
+
+            if (finish.Code != 226)
+                throw new IOException("Turbo file did not finish: " + finish.Text);
+        }
+
+        async Task DownloadStandardFtpAsync(
+            string remotePath,
+            string localPartPath,
+            long expectedSize,
+            long offset,
+            int bufferBytes,
+            CancellationToken token,
+            Action<int> onBytes)
+        {
             using (var data = await OpenPassiveAsync(token))
             {
                 if (offset > 0)
                 {
-                    var rest = await CommandAsync("REST " + offset.ToString(CultureInfo.InvariantCulture), token);
+                    var rest = await CommandAsync(
+                        "REST " + offset.ToString(CultureInfo.InvariantCulture),
+                        token);
                     Expect(rest, 350);
                 }
 
                 string path = NormalizeRemote(remotePath);
                 var start = await CommandAsync("RETR " + path, token);
+
                 if (start.Code != 150 && start.Code != 125)
-                    throw new IOException("Cannot download " + path + ": " + start.Text);
-
-                data.ReceiveBufferSize = 4 * 1024 * 1024;
-                data.NoDelay = true;
-
-                Directory.CreateDirectory(Path.GetDirectoryName(localPartPath));
-
-                using (var fs = new FileStream(
-                    localPartPath,
-                    FileMode.OpenOrCreate,
-                    FileAccess.Write,
-                    FileShare.Read,
-                    bufferBytes,
-                    FileOptions.SequentialScan | FileOptions.Asynchronous))
-                {
-                    fs.Seek(offset, SeekOrigin.Begin);
-                    if (fs.Length != offset) fs.SetLength(offset);
-
-                    byte[] buffer = new byte[bufferBytes];
-                    long got = offset;
-                    Stream input = data.GetStream();
-
-                    while (got < expectedSize)
-                    {
-                        token.ThrowIfCancellationRequested();
-
-                        int want = (int)Math.Min(buffer.Length, expectedSize - got);
-                        int n = await ReadWithTimeoutAsync(input, buffer, 0, want, 20000, token);
-
-                        if (n <= 0) break;
-
-                        await fs.WriteAsync(buffer, 0, n, token);
-                        got += n;
-                        if (onBytes != null) onBytes(n);
-                    }
-
-                    if (got != expectedSize)
-                        throw new IOException("Incomplete FTP file: " + got + " / " + expectedSize);
-                }
-
-                data.Close();
-
-                var end = await ReadResponseAsync(12000, token);
-                if (end.Code != 226 && end.Code != 250)
-                    throw new IOException("FTP transfer did not finish: " + end.Text);
-            }
-        }
-
-        async Task<TcpClient> OpenPassiveAsync(CancellationToken token)
-        {
-            var epsv = await CommandAsync("EPSV", token);
-
-            int dataPort = 0;
-
-            if (epsv.Code == 229)
-            {
-                int a = epsv.Text.IndexOf("(|||", StringComparison.Ordinal);
-                int b = a >= 0 ? epsv.Text.IndexOf("|)", a + 4, StringComparison.Ordinal) : -1;
-
-                if (a >= 0 && b > a)
-                {
-                    string p = epsv.Text.Substring(a + 4, b - (a + 4));
-                    int.TryParse(p, out dataPort);
-                }
-            }
-
-            if (dataPort <= 0)
-            {
-                var pasv = await CommandAsync("PASV", token);
-                Expect(pasv, 227);
-
-                int l = pasv.Text.IndexOf('(');
-                int r = pasv.Text.IndexOf(')', l + 1);
-                if (l < 0 || r <= l) throw new IOException("Invalid PASV response");
-
-                string[] v = pasv.Text.Substring(l + 1, r - l - 1).Split(',');
-                if (v.Length != 6) throw new IOException("Invalid PASV response");
-
-                int p1, p2;
-                if (!int.TryParse(v[4], out p1) || !int.TryParse(v[5], out p2))
-                    throw new IOException("Invalid PASV port");
-
-                dataPort = p1 * 256 + p2;
-            }
-
-            var data = new TcpClient();
-            data.NoDelay = true;
-            data.ReceiveBufferSize = 4 * 1024 * 1024;
-            await ConnectTcpAsync(data, host, dataPort, 6000, token);
-            return data;
-        }
-
-        async Task<FtpResponse> CommandAsync(string command, CancellationToken token)
-        {
-            EnsureConnected();
-            await writer.WriteLineAsync(command);
-            return await ReadResponseAsync(12000, token);
-        }
-
-        async 
+                    throw new IOException("Cannot download " + path + 

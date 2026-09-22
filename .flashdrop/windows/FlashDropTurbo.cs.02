@@ -1,8 +1,148 @@
-          var title = LabelX("FLASHDROP TURBO 3", 23, Color.White, true);
+ry != b.IsDirectory)
+                    return a.IsDirectory ? -1 : 1;
+
+                return string.Compare(
+                    a.Name,
+                    b.Name,
+                    StringComparison.OrdinalIgnoreCase);
+            });
+
+            return items;
+        }
+
+        static string CombineRemote(string parent, string name)
+        {
+            string p = NormalizeRemote(parent);
+
+            if (p == "/")
+                return "/" + name;
+
+            return p.TrimEnd('/') + "/" + name;
+        }
+
+        static string NormalizeRemote(string p)
+        {
+            p = (p ?? "/").Replace('\\', '/');
+
+            if (!p.StartsWith("/"))
+                p = "/" + p;
+
+            while (p.Contains("//"))
+                p = p.Replace("//", "/");
+
+            return p;
+        }
+
+        static void Expect(FtpResponse r, int code)
+        {
+            if (r.Code != code)
+                throw new IOException(
+                    "FTP " + code + " expected, got: " + r.Text);
+        }
+
+        void EnsureConnected()
+        {
+            if (control == null ||
+                stream == null ||
+                writer == null ||
+                !control.Connected)
+                throw new IOException("FTP session is not connected");
+        }
+
+        void DisposeControl()
+        {
+            turboActive = false;
+
+            try { if (writer != null) writer.Dispose(); } catch { }
+            try { if (control != null) control.Close(); } catch { }
+
+            writer = null;
+            stream = null;
+            control = null;
+        }
+
+        public void Dispose()
+        {
+            try
+            {
+                if (writer != null)
+                {
+                    writer.WriteLine("QUIT");
+                    writer.Flush();
+                }
+            }
+            catch { }
+
+            DisposeControl();
+        }
+    }
+
+    sealed class MainForm : Form
+    {
+        readonly Color Ink = Color.FromArgb(18, 29, 51);
+        readonly Color Muted = Color.FromArgb(100, 110, 130);
+        readonly Color Blue = Color.FromArgb(73, 63, 240);
+        readonly Color Green = Color.FromArgb(0, 148, 120);
+        readonly Color Bg = Color.FromArgb(245, 247, 252);
+
+        TextBox addressBox, localBox;
+        Label connectionLabel, pathLabel, statusLabel, speedLabel, totalLabel;
+        ListView remoteList;
+        Button detectBtn, connectBtn, upBtn, refreshBtn, browseBtn, openBtn, startBtn, cancelBtn;
+        NumericUpDown workersBox, bufferBox;
+        ProgressBar progress;
+
+        FtpEndpoint endpoint;
+        string currentPath = "/";
+        CancellationTokenSource transferCts;
+
+        long totalBytes;
+        long completedBytes;
+        long speedSampleBytes;
+        DateTime speedSampleAt;
+        double smoothedMbps;
+        System.Windows.Forms.Timer speedTimer;
+
+        public MainForm()
+        {
+            Text = "FlashDrop Turbo v3.1 - Persistent Stream - by Shashank Patel";
+            StartPosition = FormStartPosition.CenterScreen;
+            MinimumSize = new Size(1000, 720);
+            Size = new Size(1180, 820);
+            BackColor = Bg;
+            Font = new Font("Segoe UI", 9.5f);
+            Icon = SystemIcons.Shield;
+            AutoScaleMode = AutoScaleMode.Dpi;
+            BuildUi();
+            Shown += async (s, e) => await AutoDetectAsync();
+        }
+
+        void BuildUi()
+        {
+            var outer = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 5,
+                BackColor = Bg,
+                Padding = new Padding(18, 14, 18, 14)
+            };
+
+            outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 108));
+            outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 126));
+            outer.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 120));
+            outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 96));
+            Controls.Add(outer);
+
+            var hero = new HeroPanel { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 10) };
+            outer.Controls.Add(hero, 0, 0);
+
+            var title = LabelX("FLASHDROP TURBO 3", 23, Color.White, true);
             title.Location = new Point(26, 14);
             hero.Controls.Add(title);
 
-            var sub = LabelX("Stable FTP transfer engine • no HTTP APIs • no 404 errors", 11.5f, Color.FromArgb(239, 246, 255), false);
+            var sub = LabelX("Persistent Turbo on the proven FTP port • no per-file socket reconnects", 11.5f, Color.FromArgb(239, 246, 255), false);
             sub.Location = new Point(28, 51);
             hero.Controls.Add(sub);
 
@@ -132,71 +272,4 @@
             browser.Controls.Add(remoteList, 0, 1);
 
             var destCard = Card();
-            destCard.Margin = new Padding(0, 0, 0, 10);
-            outer.Controls.Add(destCard, 0, 3);
-
-            var d = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                ColumnCount = 5,
-                RowCount = 2,
-                Padding = new Padding(14, 10, 14, 10),
-                BackColor = Color.White
-            };
-            d.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
-            d.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            d.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            d.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
-            d.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
-            d.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 190));
-            d.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 115));
-            destCard.Controls.Add(d);
-
-            d.Controls.Add(LabelX("DESTINATION ON THIS PC", 9, Muted, true), 0, 0);
-            var note = LabelX("4 workers / 2 MB buffer recommended for OnePlus", 8.8f, Muted, false);
-            note.Dock = DockStyle.Fill;
-            note.TextAlign = ContentAlignment.MiddleRight;
-            d.SetColumnSpan(note, 4);
-            d.Controls.Add(note, 1, 0);
-
-            localBox = Box();
-            localBox.Text = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "FlashDrop");
-            d.Controls.Add(localBox, 0, 1);
-
-            browseBtn = Btn("CHOOSE FOLDER", Color.FromArgb(229, 248, 241), Green);
-            browseBtn.Click += (s, e) => ChooseFolder();
-            d.Controls.Add(browseBtn, 1, 1);
-
-            openBtn = Btn("OPEN FOLDER", Color.FromArgb(240, 244, 250), Ink);
-            openBtn.Click += (s, e) => OpenDestination();
-            d.Controls.Add(openBtn, 2, 1);
-
-            startBtn = Btn("START TURBO COPY", Green, Color.White);
-            startBtn.Font = new Font("Segoe UI", 10f, FontStyle.Bold);
-            startBtn.Click += async (s, e) => await StartTransferAsync();
-            d.Controls.Add(startBtn, 3, 1);
-
-            cancelBtn = Btn("CANCEL", Color.FromArgb(255, 236, 238), Color.FromArgb(185, 45, 55));
-            cancelBtn.Enabled = false;
-            cancelBtn.Click += (s, e) => { if (transferCts != null) transferCts.Cancel(); };
-            d.Controls.Add(cancelBtn, 4, 1);
-
-            var bottom = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                ColumnCount = 3,
-                RowCount = 2,
-                Padding = new Padding(2, 8, 2, 0),
-                BackColor = Bg
-            };
-            bottom.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
-            bottom.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
-            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 235));
-            outer.Controls.Add(bottom, 0, 4);
-
-            progress = new ProgressBar
-            {
-                Dock = DockStyle.Fill,
-                Style = ProgressBarStyle.Conti
+            destCard.Margin = new Padding(0, 0
