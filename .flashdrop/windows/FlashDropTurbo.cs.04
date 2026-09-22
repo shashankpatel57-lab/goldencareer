@@ -59,7 +59,7 @@
             catch(Exception ex){SetStatus("Transfer stopped: "+ex.Message,true);}
             finally
             {
-                speedTimer.Stop(); transferWatch?.Stop(); cts.Dispose(); cts=null; startBtn.Enabled=true; cancelBtn.Enabled=false; ToggleConnect(true);
+                speedTimer.Stop(); if(transferWatch!=null) transferWatch.Stop(); cts.Dispose(); cts=null; startBtn.Enabled=true; cancelBtn.Enabled=false; ToggleConnect(true);
             }
         }
 
