@@ -65,7 +65,7 @@ public class FileServerService extends Service {
             running = true;
 
             NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-            nm.notify(1001, buildNotification("Turbo 3 FTP active • " + ftpUrl));
+            nm.notify(1001, buildNotification("Turbo 3.1 persistent stream active • " + ftpUrl));
         } catch (Exception e) {
             running = false;
             httpUrl = null;
