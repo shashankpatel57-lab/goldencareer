@@ -126,7 +126,6 @@ public class FtpFileServer {
                         writeRaw(out, " REST STREAM\r\n");
                         writeRaw(out, " XFD1\r\n");
                         writeRaw(out, " XFD2\r\n");
-                        writeRaw(out, " XFD2 PACKED-FOLDER\r\n");
                         writeRaw(out, " MLST type*;size*;modify*;\r\n");
                         writeRaw(out, "211 End\r\n");
                         break;
@@ -249,9 +248,6 @@ public class FtpFileServer {
                         break;
                     }
                     case "XFD2":
-                        handlePackedFolder(s, in, out, arg);
-                        return;
-                    case "XFD2":
                         reply(out, 200, "XFD2 READY");
                         handlePackedStream(s, in, out);
                         return;
@@ -291,7 +287,7 @@ public class FtpFileServer {
         long offset;
     }
 
-    private void handlePackedFolder(
+    private void handleLegacyPackedFolder(
             Socket socket,
             BufferedReader in,
             BufferedWriter controlOut,
