@@ -43,8 +43,8 @@ public class FtpFileServer {
         }
         if (controlServer == null) throw last == null ? new IOException("No free FTP port") : last;
 
-        pool = new ThreadPoolExecutor(2, 12, 60L, TimeUnit.SECONDS,
-                new LinkedBlockingQueue<Runnable>(64), r -> {
+        pool = new ThreadPoolExecutor(4, 24, 60L, TimeUnit.SECONDS,
+                new LinkedBlockingQueue<Runnable>(128), r -> {
             Thread t = new Thread(r, "FlashDropFTP");
             t.setDaemon(true);
             return t;
@@ -277,10 +277,11 @@ public class FtpFileServer {
              Socket data = ps.accept();
              RandomAccessFile raf = new RandomAccessFile(file, "r")) {
             data.setTcpNoDelay(true);
-            data.setSendBufferSize(2 * 1024 * 1024);
+            data.setSendBufferSize(4 * 1024 * 1024);
+            data.setKeepAlive(true);
             raf.seek(offset);
-            OutputStream out = new BufferedOutputStream(data.getOutputStream(), 1024 * 1024);
-            byte[] buf = new byte[512 * 1024];
+            OutputStream out = new BufferedOutputStream(data.getOutputStream(), 2 * 1024 * 1024);
+            byte[] buf = new byte[2 * 1024 * 1024];
             int n;
             while ((n = raf.read(buf)) >= 0) {
                 if (n == 0) continue;
