@@ -1,4 +1,4 @@
-name: Build FlashDrop v4.0
+name: Build BharatDrop v5.0 Release
 
 on:
   push:
@@ -9,90 +9,60 @@ permissions:
   contents: read
 
 jobs:
-  windows-helper:
+  windows-desktop:
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Reassemble Windows Turbo source
+      - name: Reassemble BharatDrop Desktop source
         shell: powershell
         run: |
           $parts = Get-ChildItem ".flashdrop/windows/FlashDropTurbo.cs.*" | Sort-Object Name
-          $out = New-Object System.IO.StreamWriter("FlashDropTurbo.cs", $false, (New-Object System.Text.UTF8Encoding($false)))
-          foreach ($p in $parts) {
-            $out.Write([System.IO.File]::ReadAllText($p.FullName))
-          }
+          $out = New-Object System.IO.StreamWriter("BharatDropDesktop.cs", $false, (New-Object System.Text.UTF8Encoding($false)))
+          foreach ($p in $parts) { $out.Write([System.IO.File]::ReadAllText($p.FullName)) }
           $out.Close()
-          Write-Host "Source bytes:" (Get-Item FlashDropTurbo.cs).Length
+          Write-Host "Source bytes:" (Get-Item BharatDropDesktop.cs).Length
 
-      - name: Compile FlashDrop Turbo
+      - name: Compile BharatDrop Desktop
         shell: powershell
         run: |
           $csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
           if (!(Test-Path $csc)) { throw "C# compiler not found: $csc" }
-          & $csc /nologo /target:winexe /optimize+ /platform:anycpu /out:FlashDropTurbo.exe /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll FlashDropTurbo.cs
+          & $csc /nologo /target:winexe /optimize+ /platform:anycpu /out:BharatDropDesktop.exe /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll BharatDropDesktop.cs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Get-FileHash FlashDropTurbo.exe -Algorithm SHA256
-          Write-Host "EXE bytes:" (Get-Item FlashDropTurbo.exe).Length
+          Get-FileHash BharatDropDesktop.exe -Algorithm SHA256
+          Write-Host "EXE bytes:" (Get-Item BharatDropDesktop.exe).Length
 
-      - name: Upload Windows Turbo helper
+      - name: Upload BharatDrop Desktop
         uses: actions/upload-artifact@v4
         with:
-          name: FlashDrop-Turbo-Windows
-          path: FlashDropTurbo.exe
+          name: BharatDrop-Desktop-Windows
+          path: BharatDropDesktop.exe
           if-no-files-found: error
           retention-days: 7
 
-  android:
-    needs: windows-helper
+  android-release:
+    needs: windows-desktop
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
-      - name: Checkout build branch
+      - name: Checkout release source
         uses: actions/checkout@v4
 
-      - name: Preserve v4.0 Android overlays
-        shell: bash
-        run: |
-          mkdir -p /tmp/flashdrop-patch
-          cp tools/flashdrop/app/src/main/java/in/flashdrop/lan/FileServerService.java /tmp/flashdrop-patch/
-          cp tools/flashdrop/app/src/main/java/in/flashdrop/lan/MainActivity.java /tmp/flashdrop-patch/
-          cp tools/flashdrop/app/src/main/java/in/flashdrop/lan/FtpFileServer.java /tmp/flashdrop-patch/
-          cp tools/flashdrop/app/src/main/java/in/flashdrop/lan/TurboFileServer.java /tmp/flashdrop-patch/
-          cp tools/flashdrop/app/src/main/java/in/flashdrop/lan/HttpFileServer.java /tmp/flashdrop-patch/
-
-      - name: Restore base FlashDrop source snapshot
-        shell: bash
-        run: |
-          cat .flashdrop/src.b64.* | tr -d '\n\r ' | base64 -d > /tmp/flashdrop-src.zip
-          echo "55354f1e7987b3051b2fcdba1985fb18ab7f2062820a90299222f236b3f7e1ab  /tmp/flashdrop-src.zip" | sha256sum -c -
-          unzip -o /tmp/flashdrop-src.zip -d .
-
-      - name: Apply v4.0 Android overlays
-        shell: bash
-        run: |
-          cp /tmp/flashdrop-patch/FileServerService.java tools/flashdrop/app/src/main/java/in/flashdrop/lan/
-          cp /tmp/flashdrop-patch/MainActivity.java tools/flashdrop/app/src/main/java/in/flashdrop/lan/
-          cp /tmp/flashdrop-patch/FtpFileServer.java tools/flashdrop/app/src/main/java/in/flashdrop/lan/
-          cp /tmp/flashdrop-patch/TurboFileServer.java tools/flashdrop/app/src/main/java/in/flashdrop/lan/
-          cp /tmp/flashdrop-patch/HttpFileServer.java tools/flashdrop/app/src/main/java/in/flashdrop/lan/
-          sed -i "s/versionCode 1/versionCode 16/" tools/flashdrop/app/build.gradle
-          sed -i "s/versionName '1.0.0'/versionName '4.0.0'/" tools/flashdrop/app/build.gradle
-          sed -i 's/android:label="FlashDrop LAN"/android:label="FlashDrop Direct"/' tools/flashdrop/app/src/main/AndroidManifest.xml
-
-      - name: Download Windows Turbo helper into APK
+      - name: Download BharatDrop Desktop into Android assets
         uses: actions/download-artifact@v4
         with:
-          name: FlashDrop-Turbo-Windows
-          path: tools/flashdrop/app/src/main/assets
+          name: BharatDrop-Desktop-Windows
+          path: /tmp/bharatdrop-desktop
 
-      - name: Verify embedded helper
+      - name: Embed desktop helper
         shell: bash
         run: |
+          mkdir -p tools/flashdrop/app/src/main/assets
+          cp /tmp/bharatdrop-desktop/BharatDropDesktop.exe tools/flashdrop/app/src/main/assets/FlashDropTurbo.exe
           test -s tools/flashdrop/app/src/main/assets/FlashDropTurbo.exe
-          file tools/flashdrop/app/src/main/assets/FlashDropTurbo.exe
           sha256sum tools/flashdrop/app/src/main/assets/FlashDropTurbo.exe
 
       - name: Set up Java 17
@@ -101,25 +71,39 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Gradle
+      - name: Set up Gradle 8.13
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.9'
+          gradle-version: '8.13'
 
-      - name: Build Android APK
-        working-directory: tools/flashdrop
-        run: gradle :app:assembleDebug --no-daemon --stacktrace
-
-      - name: Stage APK
+      - name: Ensure Android 16 SDK
         shell: bash
         run: |
-          cp tools/flashdrop/app/build/outputs/apk/debug/app-debug.apk FlashDrop-Direct-v4.0.apk
-          sha256sum FlashDrop-Direct-v4.0.apk
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
-      - name: Upload Android APK
+      - name: Build release APK and AAB
+        working-directory: tools/flashdrop
+        shell: bash
+        run: |
+          gradle :app:clean :app:assembleRelease :app:bundleRelease --no-daemon --stacktrace
+
+      - name: Stage unsigned release for final signing
+        shell: bash
+        run: |
+          mkdir -p release
+          cp tools/flashdrop/app/build/outputs/apk/release/app-release-unsigned.apk release/BharatDrop-v5.0.0-unsigned.apk
+          cp tools/flashdrop/app/build/outputs/bundle/release/app-release.aab release/BharatDrop-v5.0.0-unsigned.aab
+          cp /tmp/bharatdrop-desktop/BharatDropDesktop.exe release/BharatDropDesktop-v5.0.exe
+          cp tools/flashdrop/PLAY_STORE_PRIVACY_POLICY.html release/Privacy-Policy.html
+          cp tools/flashdrop/PLAY_STORE_LISTING.md release/Play-Store-Listing.md
+          cp tools/flashdrop/MANAGE_EXTERNAL_STORAGE_DECLARATION.md release/All-Files-Access-Declaration.md
+          sha256sum release/*
+
+      - name: Upload release bundle
         uses: actions/upload-artifact@v4
         with:
-          name: FlashDrop-Direct-v4.0-APK
-          path: FlashDrop-Direct-v4.0.apk
+          name: BharatDrop-v5.0.0-Release
+          path: release/
           if-no-files-found: error
           retention-days: 7
