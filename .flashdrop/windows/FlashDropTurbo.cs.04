@@ -1,35 +1,4 @@
-rue;
-                                    }
-                                    catch(Exception ex)
-                                    {
-                                        last=ex;
-                                        session.Close();
-                                        Thread.Sleep(250*attempt);
-                                    }
-                                }
-
-                                if(!ok)
-                                {
-                                    errors.Enqueue(file.RemotePath+" : "+(last==null?"transfer failed":last.Message));
-                                    continue;
-                                }
-
-                                try
-                                {
-                                    long got=File.Exists(file.PartPath)?new FileInfo(file.PartPath).Length:0;
-                                    if(got!=file.Size)throw new IOException("Incomplete file "+got+"/"+file.Size);
-
-                                    if(File.Exists(file.FinalPath))File.Delete(file.FinalPath);
-                                    File.Move(file.PartPath,file.FinalPath);
-
-                                    if(file.Modified>0)
-                                        File.SetLastWriteTime(
-                                            file.FinalPath,
-                                            DateTimeOffset.FromUnixTimeMilliseconds(file.Modified).LocalDateTime);
-                                }
-                                catch(Exception ex)
-                                {
-                                    errors.Enqueue(file.RemotePath+" : "+ex.Message);
+                                   errors.Enqueue(file.RemotePath+" : "+ex.Message);
                                 }
                             }
                         }
@@ -189,4 +158,59 @@ rue;
                 }
             }
             sw.Stop();
-            return bytes
+            return bytes/1048576d/Math.Max(.001,sw.Elapsed.TotalSeconds);
+        }
+
+        async Task DownloadFileFtpAsync(RemoteFile file,CancellationToken token)
+        {
+            long offset=0;
+
+            if(File.Exists(file.PartPath))
+            {
+                offset=new FileInfo(file.PartPath).Length;
+
+                if(offset<0 || offset>file.Size)
+                {
+                    File.Delete(file.PartPath);
+                    offset=0;
+                }
+            }
+
+            string remote=(file.RemotePath??"").Replace('\\','/').TrimStart('/');
+            string[] pieces=remote.Split(new[]{'/'},StringSplitOptions.RemoveEmptyEntries);
+            string escaped=string.Join("/",pieces.Select(x=>Uri.EscapeDataString(x)));
+            string url="ftp://"+TurboHost+":"+compatibilityFtpPort+"/"+escaped;
+
+            var req=(FtpWebRequest)WebRequest.Create(url);
+            req.Method=WebRequestMethods.Ftp.DownloadFile;
+            req.Credentials=new NetworkCredential("flashdrop","1234");
+            req.UseBinary=true;
+            req.UsePassive=true;
+            req.KeepAlive=false;
+            req.Proxy=null;
+            req.Timeout=15000;
+            req.ReadWriteTimeout=15000;
+            req.ContentOffset=offset;
+
+            using(token.Register(()=>{try{req.Abort();}catch{}}))
+            using(var res=(FtpWebResponse)await req.GetResponseAsync())
+            using(var input=res.GetResponseStream())
+            {
+                int bufferBytes=(int)chunkBox.Value*1024*1024;
+                bufferBytes=Math.Max(1024*1024,Math.Min(8*1024*1024,bufferBytes));
+                byte[] buf=new byte[bufferBytes];
+
+                using(var fs=new FileStream(
+                    file.PartPath,
+                    FileMode.OpenOrCreate,
+                    FileAccess.Write,
+                    FileShare.Read,
+                    bufferBytes,
+                    FileOptions.SequentialScan | FileOptions.Asynchronous))
+                {
+                    fs.Seek(offset,SeekOrigin.Begin);
+                    if(fs.Length!=offset)fs.SetLength(offset);
+
+                    long got=offset;
+
+                    

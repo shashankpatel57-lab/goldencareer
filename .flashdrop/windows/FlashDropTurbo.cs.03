@@ -1,33 +1,4 @@
-Color=Color.FromArgb(32,74,156); li.Font=new Font(remoteList.Font,FontStyle.Bold);}
-                    remoteList.Items.Add(li);
-                }
-                connectionLabel.Text="Connected"; connectionLabel.ForeColor=Green;
-                SetStatus("Connected. Double-click a folder to open it; START TURBO COPY downloads the current folder tree.",false);
-            }
-            catch(WebException ex)
-            {
-                connectionLabel.Text="Connection failed"; connectionLabel.ForeColor=Color.Firebrick;
-                SetStatus(WebMessage(ex),true);
-            }
-            catch(Exception ex){SetStatus(ex.Message,true);} finally{ToggleConnect(true);}
-        }
-
-        async Task<ListResponse> GetListAsync(string path, CancellationToken token)
-        {
-            var url=BaseUrl+"/api/list?pin="+Uri.EscapeDataString(Pin)+"&path="+Uri.EscapeDataString(path??"");
-            string txt=await GetStringAsync(url,token);
-            var r=json.Deserialize<ListResponse>(txt);
-            if(r==null) throw new Exception("Invalid response from phone");
-            if(!string.IsNullOrEmpty(r.error)) throw new Exception(r.error);
-            return r;
-        }
-
-        async Task<string> GetStringAsync(string url, CancellationToken token)
-        {
-            return await Task.Run(()=>{
-                var req=(HttpWebRequest)WebRequest.Create(url); req.Method="GET"; req.Timeout=10000; req.ReadWriteTimeout=10000; req.Proxy=null; req.KeepAlive=true;
-                using(token.Register(()=>{try{req.Abort();}catch{}}))
-                using(var res=(HttpWebResponse)req.GetResponse()) using(var sr=new StreamReader(res.GetResponseStream(),Encoding.UTF8)) return sr.ReadToEnd();
+n sr.ReadToEnd();
             },token);
         }
 
@@ -74,9 +45,19 @@ Color=Color.FromArgb(32,74,156); li.Font=new Font(remoteList.Font,FontStyle.Bold
 
             try
             {
-                SetStatus("Testing direct LAN path…",false);
-                double link=await RunTurboBenchmarkAsync(8L*1024L*1024L,token);
-                SetStatus("Raw LAN test: "+link.ToString("0.0")+" MB/s. Scanning selected phone folder…",false);
+                compatibilityFtpMode=false;
+                SetStatus("Testing direct Turbo path…",false);
+
+                try
+                {
+                    double link=await RunTurboBenchmarkAsync(8L*1024L*1024L,token);
+                    SetStatus("Raw Turbo available: "+link.ToString("0.0")+" MB/s. Scanning selected phone folder…",false);
+                }
+                catch(Exception)
+                {
+                    compatibilityFtpMode=true;
+                    SetStatus("OnePlus / compatibility mode selected automatically. Using parallel local FTP Turbo path…",false);
+                }
 
                 var remoteRoot=currentPath??"";
                 string rootName=string.IsNullOrEmpty(remoteRoot)?"PhoneBackup":Sanitize(RemoteLeaf(remoteRoot));
@@ -146,7 +127,11 @@ Color=Color.FromArgb(32,74,156); li.Font=new Font(remoteList.Font,FontStyle.Bold
                 smoothedMbps=0;
                 speedTimer.Start();
 
-                SetStatus("Continuous Turbo v1.7 running — "+workers+" persistent lanes • RAM write-ahead buffering.",false);
+                SetStatus(
+                    compatibilityFtpMode
+                        ? "Compatibility Turbo running — "+workers+" parallel FTP lanes • resume enabled."
+                        : "Adaptive Turbo v1.8 running — "+workers+" persistent raw lanes • RAM write-ahead buffering.",
+                    false);
 
                 var errors=new ConcurrentQueue<string>();
                 var tasks=new List<Task>();
@@ -167,5 +152,39 @@ Color=Color.FromArgb(32,74,156); li.Font=new Font(remoteList.Font,FontStyle.Bold
                                 {
                                     try
                                     {
-                                        await DownloadFileTurboAsync(file,session,token);
-                                        ok=t
+                                        if(compatibilityFtpMode)
+                                            await DownloadFileFtpAsync(file,token);
+                                        else
+                                            await DownloadFileTurboAsync(file,session,token);
+                                        ok=true;
+                                    }
+                                    catch(Exception ex)
+                                    {
+                                        last=ex;
+                                        session.Close();
+                                        Thread.Sleep(250*attempt);
+                                    }
+                                }
+
+                                if(!ok)
+                                {
+                                    errors.Enqueue(file.RemotePath+" : "+(last==null?"transfer failed":last.Message));
+                                    continue;
+                                }
+
+                                try
+                                {
+                                    long got=File.Exists(file.PartPath)?new FileInfo(file.PartPath).Length:0;
+                                    if(got!=file.Size)throw new IOException("Incomplete file "+got+"/"+file.Size);
+
+                                    if(File.Exists(file.FinalPath))File.Delete(file.FinalPath);
+                                    File.Move(file.PartPath,file.FinalPath);
+
+                                    if(file.Modified>0)
+                                        File.SetLastWriteTime(
+                                            file.FinalPath,
+                                            DateTimeOffset.FromUnixTimeMilliseconds(file.Modified).LocalDateTime);
+                                }
+                                catch(Exception ex)
+                                {
+ 

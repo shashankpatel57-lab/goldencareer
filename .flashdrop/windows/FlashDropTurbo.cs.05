@@ -1,4 +1,21 @@
-/1048576d/Math.Max(.001,sw.Elapsed.TotalSeconds);
+while(got<file.Size)
+                    {
+                        token.ThrowIfCancellationRequested();
+
+                        int n=await ReadWithTimeoutAsync(
+                            input,buf,0,(int)Math.Min(buf.Length,file.Size-got),token,15000);
+
+                        if(n<=0)break;
+
+                        await fs.WriteAsync(buf,0,n,token);
+                        got+=n;
+                        Interlocked.Add(ref completedBytes,n);
+                    }
+
+                    if(got!=file.Size)
+                        throw new IOException("Compatibility transfer incomplete "+got+"/"+file.Size);
+                }
+            }
         }
 
         async Task DownloadFileTurboAsync(RemoteFile file,TurboSession session,CancellationToken token)

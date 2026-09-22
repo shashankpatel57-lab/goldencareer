@@ -97,6 +97,8 @@ namespace FlashDropTurbo
         long speedSampleBytes;
         DateTime speedSampleAt;
         double smoothedMbps;
+        bool compatibilityFtpMode;
+        readonly int compatibilityFtpPort = 2121;
         System.Windows.Forms.Timer speedTimer;
         readonly JavaScriptSerializer json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
 
@@ -168,7 +170,7 @@ namespace FlashDropTurbo
 
         public MainForm()
         {
-            Text = "FlashDrop Turbo v1.7 - by Shashank Patel";
+            Text = "FlashDrop Turbo v1.8 - by Shashank Patel";
             StartPosition = FormStartPosition.CenterScreen;
             MinimumSize = new Size(1000, 720);
             Size = new Size(1180, 820);
@@ -221,4 +223,13 @@ namespace FlashDropTurbo
 
             var grid = new TableLayoutPanel {
                 Dock = DockStyle.Fill,
-     
+                ColumnCount = 7,
+                RowCount = 3,
+                Padding = new Padding(14,10,14,10),
+                BackColor = Color.White
+            };
+            grid.RowStyles.Add(new RowStyle(SizeType.Absolute,24));
+            grid.RowStyles.Add(new RowStyle(SizeType.Absolute,42));
+            grid.RowStyles.Add(new RowStyle(SizeType.Percent,100));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,38));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,100));

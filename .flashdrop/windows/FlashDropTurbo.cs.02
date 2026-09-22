@@ -1,28 +1,4 @@
-Y",Green,Color.White);
-            startBtn.Font=new Font("Segoe UI",10f,FontStyle.Bold);
-            startBtn.Click+=async(s,e)=>await StartTransferAsync();
-            d.Controls.Add(startBtn,3,1);
-
-            cancelBtn=Btn("CANCEL",Color.FromArgb(255,236,238),Color.FromArgb(185,45,55));
-            cancelBtn.Enabled=false;
-            cancelBtn.Click+=(s,e)=>{ if(cts!=null) cts.Cancel(); };
-            d.Controls.Add(cancelBtn,4,1);
-
-            var bottom = new TableLayoutPanel {
-                Dock=DockStyle.Fill,
-                ColumnCount=3,
-                RowCount=2,
-                Padding=new Padding(2,8,2,0),
-                BackColor=Bg
-            };
-            bottom.RowStyles.Add(new RowStyle(SizeType.Absolute,28));
-            bottom.RowStyles.Add(new RowStyle(SizeType.Percent,100));
-            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
-            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,150));
-            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,235));
-            outer.Controls.Add(bottom,0,4);
-
-            progress = new ProgressBar {
+ew ProgressBar {
                 Dock=DockStyle.Fill,
                 Style=ProgressBarStyle.Continuous,
                 Maximum=1000,
@@ -31,7 +7,7 @@ Y",Green,Color.White);
             bottom.SetColumnSpan(progress,3);
             bottom.Controls.Add(progress,0,0);
 
-            statusLabel=L("Ready. Continuous Turbo v1.7 • persistent connections • live MB/s.",9.5f,Muted,false);
+            statusLabel=L("Ready. Adaptive Turbo v1.8 • automatically chooses the fastest compatible LAN path.",9.5f,Muted,false);
             statusLabel.Dock=DockStyle.Fill;
             statusLabel.TextAlign=ContentAlignment.MiddleLeft;
             statusLabel.AutoEllipsis=true;
@@ -157,4 +133,33 @@ Y",Green,Color.White);
                     li.SubItems.Add(x.dir?"Folder":"File");
                     li.SubItems.Add(x.dir?"—":FormatBytes(x.size));
                     li.SubItems.Add(x.modified>0?DateTimeOffset.FromUnixTimeMilliseconds(x.modified).LocalDateTime.ToString("g"):"—");
-                    if(x.dir){li.Fore
+                    if(x.dir){li.ForeColor=Color.FromArgb(32,74,156); li.Font=new Font(remoteList.Font,FontStyle.Bold);}
+                    remoteList.Items.Add(li);
+                }
+                connectionLabel.Text="Connected"; connectionLabel.ForeColor=Green;
+                SetStatus("Connected. Double-click a folder to open it; START TURBO COPY downloads the current folder tree.",false);
+            }
+            catch(WebException ex)
+            {
+                connectionLabel.Text="Connection failed"; connectionLabel.ForeColor=Color.Firebrick;
+                SetStatus(WebMessage(ex),true);
+            }
+            catch(Exception ex){SetStatus(ex.Message,true);} finally{ToggleConnect(true);}
+        }
+
+        async Task<ListResponse> GetListAsync(string path, CancellationToken token)
+        {
+            var url=BaseUrl+"/api/list?pin="+Uri.EscapeDataString(Pin)+"&path="+Uri.EscapeDataString(path??"");
+            string txt=await GetStringAsync(url,token);
+            var r=json.Deserialize<ListResponse>(txt);
+            if(r==null) throw new Exception("Invalid response from phone");
+            if(!string.IsNullOrEmpty(r.error)) throw new Exception(r.error);
+            return r;
+        }
+
+        async Task<string> GetStringAsync(string url, CancellationToken token)
+        {
+            return await Task.Run(()=>{
+                var req=(HttpWebRequest)WebRequest.Create(url); req.Method="GET"; req.Timeout=10000; req.ReadWriteTimeout=10000; req.Proxy=null; req.KeepAlive=true;
+                using(token.Register(()=>{try{req.Abort();}catch{}}))
+                using(var res=(HttpWebResponse)req.GetResponse()) using(var sr=new StreamReader(res.GetResponseStream(),Encoding.UTF8)) retur
