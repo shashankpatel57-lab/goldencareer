@@ -1,4 +1,4 @@
-alPath);
+ath);
 
             if (file.ModifiedUtc != DateTime.MinValue)
             {

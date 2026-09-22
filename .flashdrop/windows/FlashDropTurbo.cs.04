@@ -1,5 +1,4 @@
-    {
-                    SetStatus("Connect to the phone first.", true);
+                  SetStatus("Connect to the phone first.", true);
                     return;
                 }
             }
@@ -30,7 +29,7 @@
 
                 var files = new List<RemoteFile>();
 
-                using (var scan = new FtpSession(endpoint.Host, endpoint.Port))
+                using (var scan = new FtpSession(endpoint.Host, endpoint.Port, false))
                 {
                     await scan.ConnectAsync(token);
                     await BuildManifestAsync(scan, currentPath, "", destRoot, files, token);
@@ -270,4 +269,4 @@
             if (size != file.Size) throw new IOException("Incomplete local file " + size + "/" + file.Size);
 
             if (File.Exists(file.FinalPath)) File.Delete(file.FinalPath);
-            File.Move(file.PartPath, file.Fin
+            File.Move(file.PartPath, file.FinalP

@@ -1,4 +1,4 @@
-ry != b.IsDirectory)
+= b.IsDirectory)
                     return a.IsDirectory ? -1 : 1;
 
                 return string.Compare(
@@ -272,4 +272,4 @@ ry != b.IsDirectory)
             browser.Controls.Add(remoteList, 0, 1);
 
             var destCard = Card();
-            destCard.Margin = new Padding(0, 0
+            destCard.Margin = new Padding(0, 0, 0, 1

@@ -328,4 +328,4 @@ namespace FlashDropTurbo
                 var start = await CommandAsync("RETR " + path, token);
 
                 if (start.Code != 150 && start.Code != 125)
-                    throw new IOException("Cannot download " + path + 
+                    throw new IOException("Cannot download " + path + ":
