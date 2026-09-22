@@ -28,7 +28,8 @@ import android.widget.Toast;
 public class MainActivity extends Activity {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private TextView serverStatus;
-    private TextView addressText;
+    private TextView ftpAddressText;
+    private TextView httpAddressText;
     private TextView pinText;
     private TextView permissionText;
     private TextView statsText;
@@ -89,15 +90,15 @@ public class MainActivity extends Activity {
             });
         }
 
-        TextView brand = text("FLASHDROP", 13, Color.rgb(44, 94, 246), true);
-        brand.setLetterSpacing(0.18f);
+        TextView brand = text("FLASHDROP DIRECT", 13, Color.rgb(44, 94, 246), true);
+        brand.setLetterSpacing(0.16f);
         root.addView(brand);
 
-        TextView title = text("Phone → PC at LAN speed", 28, Color.rgb(14, 24, 42), true);
+        TextView title = text("Copy phone folders like a drive", 27, Color.rgb(14, 24, 42), true);
         title.setPadding(0, dp(6), 0, 0);
         root.addView(title);
 
-        TextView sub = text("No internet. No cloud. No ZIP. Open the address on your Windows PC and pull files directly over your phone hotspot.", 15, Color.rgb(85, 96, 116), false);
+        TextView sub = text("No scripts. No ZIP. No internet. Connect the PC to your phone's 5 GHz hotspot, start the server, then open the FTP address directly in Windows File Explorer.", 15, Color.rgb(85, 96, 116), false);
         sub.setPadding(0, dp(8), 0, dp(18));
         root.addView(sub);
 
@@ -105,25 +106,54 @@ public class MainActivity extends Activity {
         root.addView(card);
         serverStatus = text("Server stopped", 16, Color.rgb(40, 52, 70), true);
         card.addView(serverStatus);
-        addressText = text("http://—", 22, Color.rgb(22, 43, 92), true);
-        addressText.setPadding(0, dp(10), 0, 0);
-        card.addView(addressText);
-        pinText = text("PIN: —", 18, Color.rgb(44, 94, 246), true);
-        pinText.setPadding(0, dp(8), 0, 0);
+
+        TextView directLabel = text("WINDOWS FILE EXPLORER", 11, Color.rgb(44, 94, 246), true);
+        directLabel.setLetterSpacing(0.10f);
+        directLabel.setPadding(0, dp(14), 0, dp(2));
+        card.addView(directLabel);
+
+        ftpAddressText = text("ftp://—", 21, Color.rgb(22, 43, 92), true);
+        card.addView(ftpAddressText);
+
+        TextView guest = text("Login: any username + any password • Read-only", 12, Color.rgb(100, 108, 123), false);
+        guest.setPadding(0, dp(5), 0, 0);
+        card.addView(guest);
+
+        TextView webLabel = text("BROWSER MODE", 11, Color.rgb(104, 113, 129), true);
+        webLabel.setLetterSpacing(0.10f);
+        webLabel.setPadding(0, dp(14), 0, dp(2));
+        card.addView(webLabel);
+        httpAddressText = text("http://—", 15, Color.rgb(72, 83, 103), true);
+        card.addView(httpAddressText);
+
+        pinText = text("Browser PIN: —", 13, Color.rgb(104, 113, 129), false);
+        pinText.setPadding(0, dp(4), 0, 0);
         card.addView(pinText);
+
         statsText = text("0 MB sent • 0 active transfers", 13, Color.rgb(104, 113, 129), false);
-        statsText.setPadding(0, dp(8), 0, 0);
+        statsText.setPadding(0, dp(10), 0, 0);
         card.addView(statsText);
 
-        startStop = button("Start file server", true);
+        startStop = button("Start direct transfer", true);
         startStop.setOnClickListener(v -> {
             if (FileServerService.isRunning()) stopServer(); else startServer();
         });
         addTopGap(root, startStop, 14);
 
-        Button copy = button("Copy PC address", false);
-        copy.setOnClickListener(v -> copyAddress());
+        Button copy = button("Copy Windows Explorer address", false);
+        copy.setOnClickListener(v -> copyFtpAddress());
         addTopGap(root, copy, 8);
+
+        TextView howTitle = text("On your Windows PC", 18, Color.rgb(14, 24, 42), true);
+        howTitle.setPadding(0, dp(24), 0, dp(8));
+        root.addView(howTitle);
+        LinearLayout how = card();
+        root.addView(how);
+        how.addView(text("1  Connect PC to the phone's 5 GHz hotspot.\n\n2  Open File Explorer — not Chrome/Edge.\n\n3  Click the address bar and type the FTP address shown above.\n\n4  If Windows asks for login, enter any username and any password.\n\n5  Your phone storage opens like a folder. Select DCIM, Downloads, Movies or any available folder → Copy → paste directly to E: / D: / any PC folder.\n\nWhole folders and subfolders transfer directly. No PowerShell script and no ZIP creation.", 14, Color.rgb(58, 69, 87), false));
+
+        Button hotspot = button("Open hotspot settings", false);
+        hotspot.setOnClickListener(v -> openHotspotSettings());
+        addTopGap(how, hotspot, 14);
 
         TextView accessTitle = text("Storage access", 18, Color.rgb(14, 24, 42), true);
         accessTitle.setPadding(0, dp(24), 0, dp(8));
@@ -136,25 +166,19 @@ public class MainActivity extends Activity {
         grant.setOnClickListener(v -> requestStorageAccess());
         addTopGap(accessCard, grant, 12);
 
-        TextView setupTitle = text("Fastest setup", 18, Color.rgb(14, 24, 42), true);
-        setupTitle.setPadding(0, dp(24), 0, dp(8));
-        root.addView(setupTitle);
-        LinearLayout setup = card();
-        root.addView(setup);
-        setup.addView(text("1  Turn on phone hotspot and choose 5 GHz / 5 GHz preferred.\n\n2  Connect the Windows PC directly to that hotspot. Internet is not required.\n\n3  Start FlashDrop, then open the shown http:// address on the PC.\n\n4  Enter the PIN shown here. Browse, search and download.\n\n5  For a complete folder with its subfolders, use “Windows Folder Pull” in the web page. It copies files directly and does not create a ZIP.", 14, Color.rgb(58, 69, 87), false));
-        Button hotspot = button("Open hotspot settings", false);
-        hotspot.setOnClickListener(v -> openHotspotSettings());
-        addTopGap(setup, hotspot, 14);
-
-        TextView perf = text("Optimized for large transfers", 18, Color.rgb(14, 24, 42), true);
+        TextView perf = text("High-speed local transfer", 18, Color.rgb(14, 24, 42), true);
         perf.setPadding(0, dp(24), 0, dp(8));
         root.addView(perf);
         LinearLayout perfCard = card();
         root.addView(perfCard);
-        perfCard.addView(text("• Raw file streaming — no recompression\n• HTTP byte-range / resume support\n• Parallel transfer handling\n• Wi‑Fi high-performance lock while server is active\n• Wake lock to reduce sleep interruptions\n• Works entirely on the local hotspot", 14, Color.rgb(58, 69, 87), false));
+        perfCard.addView(text("• Direct FTP file streaming — no compression/repacking\n• Resume support for interrupted files\n• Large transfer buffers\n• Multiple transfer sessions\n• Wi-Fi high-performance lock\n• Wake lock during server operation\n• Internet is not required", 14, Color.rgb(58, 69, 87), false));
 
-        TextView note = text("Android security note: “All files access” covers shared storage, but Android still blocks a normal app from reading other apps’ private /data directories and some protected Android/data content.", 12, Color.rgb(116, 124, 139), false);
-        note.setPadding(0, dp(18), 0, 0);
+        TextView security = text("Use the FTP mode only on your own hotspot/private Wi-Fi and stop the server when finished. The FTP view is deliberately read-only, so the PC cannot delete or overwrite phone files.", 12, Color.rgb(116, 124, 139), false);
+        security.setPadding(0, dp(18), 0, 0);
+        root.addView(security);
+
+        TextView note = text("Android still blocks other apps' private /data directories and some protected Android/data content even with All files access.", 12, Color.rgb(116, 124, 139), false);
+        note.setPadding(0, dp(9), 0, 0);
         root.addView(note);
     }
 
@@ -166,7 +190,7 @@ public class MainActivity extends Activity {
         }
         Intent i = new Intent(this, FileServerService.class);
         if (Build.VERSION.SDK_INT >= 26) startForegroundService(i); else startService(i);
-        Toast.makeText(this, "Starting local file server…", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "Starting direct transfer…", Toast.LENGTH_SHORT).show();
         handler.postDelayed(this::refreshUi, 700);
     }
 
@@ -177,15 +201,15 @@ public class MainActivity extends Activity {
         handler.postDelayed(this::refreshUi, 300);
     }
 
-    private void copyAddress() {
-        String url = FileServerService.getUrl();
+    private void copyFtpAddress() {
+        String url = FileServerService.getFtpUrl();
         if (url == null) {
             Toast.makeText(this, "Start the server first", Toast.LENGTH_SHORT).show();
             return;
         }
         ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-        cm.setPrimaryClip(ClipData.newPlainText("FlashDrop address", url));
-        Toast.makeText(this, "Address copied", Toast.LENGTH_SHORT).show();
+        cm.setPrimaryClip(ClipData.newPlainText("FlashDrop Windows address", url));
+        Toast.makeText(this, "Windows Explorer address copied", Toast.LENGTH_SHORT).show();
     }
 
     private void openHotspotSettings() {
@@ -224,15 +248,16 @@ public class MainActivity extends Activity {
 
     private void refreshUi() {
         boolean running = FileServerService.isRunning();
-        String url = FileServerService.getUrl();
-        serverStatus.setText(running ? "● Server online" : "Server stopped");
+        String ftp = FileServerService.getFtpUrl();
+        String http = FileServerService.getHttpUrl();
+        serverStatus.setText(running ? "● Direct transfer online" : "Server stopped");
         serverStatus.setTextColor(running ? Color.rgb(22, 143, 94) : Color.rgb(92, 102, 119));
-        addressText.setText(url == null ? "http://—" : url);
-        pinText.setText("PIN: " + (running ? FileServerService.getPin() : "—"));
-        long bytes = FileServerService.getBytesServed();
-        statsText.setText(formatBytes(bytes) + " sent • " + FileServerService.getActiveTransfers() + " active transfers");
-        startStop.setText(running ? "Stop file server" : "Start file server");
-        permissionText.setText(hasStorageAccess() ? "✓ All-files access granted for shared storage" : "Permission required before the server can browse shared storage");
+        ftpAddressText.setText(ftp == null ? "ftp://—" : ftp);
+        httpAddressText.setText(http == null ? "http://—" : http);
+        pinText.setText("Browser PIN: " + (running ? FileServerService.getPin() : "—"));
+        statsText.setText(formatBytes(FileServerService.getBytesServed()) + " sent • " + FileServerService.getActiveTransfers() + " active transfers");
+        startStop.setText(running ? "Stop direct transfer" : "Start direct transfer");
+        permissionText.setText(hasStorageAccess() ? "✓ All-files access granted for shared storage" : "Permission required before shared storage can be exposed");
         permissionText.setTextColor(hasStorageAccess() ? Color.rgb(22, 143, 94) : Color.rgb(185, 83, 32));
     }
 
