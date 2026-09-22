@@ -19,15 +19,17 @@ import java.util.Locale;
 public class FileServerService extends Service {
     public static final String ACTION_STOP = "in.flashdrop.lan.STOP";
     private static volatile boolean running = false;
-    private static volatile String url;
+    private static volatile String httpUrl;
+    private static volatile String ftpUrl;
     private static volatile String pin = "------";
-    private static volatile HttpFileServer server;
+    private static volatile HttpFileServer httpServer;
+    private static volatile FtpFileServer ftpServer;
     private static PowerManager.WakeLock wakeLock;
     private static WifiManager.WifiLock wifiLock;
 
     @Override public void onCreate() {
         super.onCreate();
-        startForeground(1001, buildNotification("Starting local file server…"));
+        startForeground(1001, buildNotification("Starting direct transfer server…"));
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
@@ -47,15 +49,24 @@ public class FileServerService extends Service {
             acquireLocks();
             pin = String.format(Locale.US, "%06d", new SecureRandom().nextInt(1_000_000));
             File root = Environment.getExternalStorageDirectory();
-            server = new HttpFileServer(root, pin);
-            server.start();
+
+            httpServer = new HttpFileServer(root, pin);
+            httpServer.start();
+
+            ftpServer = new FtpFileServer(root);
+            ftpServer.start();
+
+            String ip = httpServer.getBestIpAddress();
+            httpUrl = "http://" + ip + ":" + httpServer.getPort();
+            ftpUrl = "ftp://" + ip + ":" + ftpServer.getPort() + "/";
             running = true;
-            url = "http://" + server.getBestIpAddress() + ":" + server.getPort();
+
             NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-            nm.notify(1001, buildNotification("Open " + url + " on your PC • PIN " + pin));
+            nm.notify(1001, buildNotification("Windows Explorer: " + ftpUrl));
         } catch (Exception e) {
             running = false;
-            url = null;
+            httpUrl = null;
+            ftpUrl = null;
             stopServer();
             stopForeground(true);
             stopSelf();
@@ -64,10 +75,15 @@ public class FileServerService extends Service {
 
     private synchronized void stopServer() {
         running = false;
-        url = null;
-        if (server != null) {
-            try { server.stop(); } catch (Exception ignored) {}
-            server = null;
+        httpUrl = null;
+        ftpUrl = null;
+        if (httpServer != null) {
+            try { httpServer.stop(); } catch (Exception ignored) {}
+            httpServer = null;
+        }
+        if (ftpServer != null) {
+            try { ftpServer.stop(); } catch (Exception ignored) {}
+            ftpServer = null;
         }
         releaseLocks();
     }
@@ -103,7 +119,7 @@ public class FileServerService extends Service {
             nm.createNotificationChannel(ch);
         }
         Notification.Builder b = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(this, channelId) : new Notification.Builder(this);
-        return b.setContentTitle("FlashDrop LAN")
+        return b.setContentTitle("FlashDrop Direct")
                 .setContentText(content)
                 .setSmallIcon(android.R.drawable.stat_sys_upload_done)
                 .setOngoing(true)
@@ -117,9 +133,18 @@ public class FileServerService extends Service {
 
     @Override public IBinder onBind(Intent intent) { return null; }
 
-    public static boolean isRunning() { return running && server != null; }
-    public static String getUrl() { return url; }
+    public static boolean isRunning() { return running && httpServer != null && ftpServer != null; }
+    public static String getHttpUrl() { return httpUrl; }
+    public static String getFtpUrl() { return ftpUrl; }
     public static String getPin() { return pin; }
-    public static long getBytesServed() { return server == null ? 0L : server.getBytesServed(); }
-    public static int getActiveTransfers() { return server == null ? 0 : server.getActiveTransfers(); }
+    public static long getBytesServed() {
+        long a = httpServer == null ? 0L : httpServer.getBytesServed();
+        long b = ftpServer == null ? 0L : ftpServer.getBytesServed();
+        return a + b;
+    }
+    public static int getActiveTransfers() {
+        int a = httpServer == null ? 0 : httpServer.getActiveTransfers();
+        int b = ftpServer == null ? 0 : ftpServer.getActiveTransfers();
+        return a + b;
+    }
 }
