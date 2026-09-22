@@ -170,7 +170,7 @@ namespace FlashDropTurbo
 
         public MainForm()
         {
-            Text = "FlashDrop Turbo v2.1 - by Shashank Patel";
+            Text = "FlashDrop Turbo v2.2 - by Shashank Patel";
             StartPosition = FormStartPosition.CenterScreen;
             MinimumSize = new Size(1000, 720);
             Size = new Size(1180, 820);
@@ -252,4 +252,8 @@ namespace FlashDropTurbo
             pinBox = Box();
             pinBox.MaxLength = 6;
             pinBox.TextAlign = HorizontalAlignment.Center;
-            pinBox.Font = new Font("Segoe UI",11f,F
+            pinBox.Font = new Font("Segoe UI",11f,FontStyle.Bold);
+            pinBox.BackColor = Color.FromArgb(255,252,232);
+            grid.Controls.Add(pinBox,1,1);
+
+            detectBtn = Btn

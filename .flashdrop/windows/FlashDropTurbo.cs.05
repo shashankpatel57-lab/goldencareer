@@ -1,4 +1,9 @@
-            long got=0;
+ptions.Asynchronous))
+            {
+                fs.Seek(offset,SeekOrigin.Begin);
+                if(fs.Length!=offset)fs.SetLength(offset);
+
+                long got=0;
 
                 while(got<remaining)
                 {

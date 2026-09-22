@@ -1,9 +1,4 @@
-xt=text, BackColor=bg, ForeColor=fg, FlatStyle=FlatStyle.Flat, Dock=DockStyle.Fill, Margin=new Padding(4,3,4,3), Font=new Font("Segoe UI",9.2f,FontStyle.Bold), Cursor=Cursors.Hand, UseVisualStyleBackColor=false };
-            b.FlatAppearance.BorderSize=0;
-            return b;
-        }
-
-        NumericUpDown Num(decimal min, decimal max, decimal value)
+own Num(decimal min, decimal max, decimal value)
         {
             return new NumericUpDown { Minimum=min, Maximum=max, Value=value, Dock=DockStyle.Fill, Margin=new Padding(0,4,8,3), Font=new Font("Segoe UI",10f), BackColor=Color.White, ForeColor=Ink };
         }
@@ -160,9 +155,34 @@ xt=text, BackColor=bg, ForeColor=fg, FlatStyle=FlatStyle.Flat, Dock=DockStyle.Fi
 
             try
             {
-                SetStatus("Testing the same HTTP path used for browsing…",false);
-                double link=await RunHttpBenchmarkAsync(16L*1024L*1024L,token);
-                SetStatus("Unified LAN path: "+link.ToString("0.0")+" MB/s. Scanning selected phone folder…",false);
+                double link=0;
+                bool benchmarkOk=false;
+
+                SetStatus("Checking transfer path…",false);
+
+                try
+                {
+                    link=await RunHttpBenchmarkAsync(16L*1024L*1024L,token);
+                    benchmarkOk=true;
+                    SetStatus("LAN test: "+link.ToString("0.0")+" MB/s. Scanning selected phone folder…",false);
+                }
+                catch(WebException ex)
+                {
+                    var response=ex.Response as HttpWebResponse;
+
+                    if(response!=null && response.StatusCode==HttpStatusCode.NotFound)
+                    {
+                        SetStatus("Older phone server detected. Speed test skipped; continuing with compatible transfer mode…",false);
+                    }
+                    else
+                    {
+                        SetStatus("Speed test unavailable. Continuing with compatible transfer mode…",false);
+                    }
+                }
+                catch(Exception)
+                {
+                    SetStatus("Speed test skipped. Continuing with compatible transfer mode…",false);
+                }
 
                 var remoteRoot=currentPath??"";
                 string rootName=string.IsNullOrEmpty(remoteRoot)?"PhoneBackup":Sanitize(RemoteLeaf(remoteRoot));
@@ -172,18 +192,4 @@ xt=text, BackColor=bg, ForeColor=fg, FlatStyle=FlatStyle.Flat, Dock=DockStyle.Fi
                 var files=new List<RemoteFile>();
                 await BuildManifestAsync(remoteRoot,"",destination,files,token);
                 totalBytes=files.Sum(f=>f.Size);
-                totalLabel.Text=files.Count+" files • "+FormatBytes(totalBytes);
-
-                if(files.Count==0)
-                {
-                    SetStatus("No readable files found in this folder.",true);
-                    return;
-                }
-
-                long alreadyDone=0;
-                var pending=new List<RemoteFile>();
-
-                foreach(var f in files)
-                {
-                    token.ThrowIfCancellationRequested();
-                    Directory.Cre
+                totalLabel.Text=files.Count+" files • "+For

@@ -1,4 +1,12 @@
- {
+eadWriteTimeout=15000;
+
+            var sw=Stopwatch.StartNew();
+            long got=0;
+
+            using(token.Register(()=>{try{req.Abort();}catch{}}))
+            using(var res=(HttpWebResponse)await req.GetResponseAsync())
+            using(var input=res.GetResponseStream())
+            {
                 byte[] buf=new byte[1024*1024];
 
                 while(got<bytes)
@@ -64,11 +72,18 @@
                     try
                     {
                         await DownloadBundleRequestAsync(todo,token,errors);
+                        break;
                     }
                     catch(OperationCanceledException){throw;}
-                    catch(Exception)
+                    catch(Exception ex)
                     {
-                        Thread.Sleep(250*attempts);
+                        if(attempts>=2)
+                        {
+                            foreach(var f in todo)
+                                errors.Enqueue(f.RemotePath+" : "+ex.Message);
+                            break;
+                        }
+                        Thread.Sleep(200*attempts);
                     }
                 }
             }
@@ -87,11 +102,9 @@
                 await DownloadBundleV2Async(files,token,errors);
                 done=true;
             }
-            catch(WebException ex)
+            catch(Exception ex)
             {
                 last=ex;
-                var r=ex.Response as HttpWebResponse;
-                if(r!=null && r.StatusCode!=HttpStatusCode.NotFound)throw;
             }
 
             if(done)return;
@@ -101,16 +114,14 @@
                 await DownloadBulkV1Async(files,token,errors);
                 done=true;
             }
-            catch(WebException ex)
+            catch(Exception ex)
             {
                 last=ex;
-                var r=ex.Response as HttpWebResponse;
-                if(r!=null && r.StatusCode!=HttpStatusCode.NotFound)throw;
             }
 
             if(done)return;
 
-            SetStatus("Older phone server detected — switching this lane to resumable HTTP file mode.",false);
+            SetStatus("Using universal resumable HTTP file mode on this phone…",false);
             await DownloadFilesHttpFallbackAsync(files,token,errors);
         }
 
@@ -265,9 +276,4 @@
                 FileAccess.Write,
                 FileShare.Read,
                 bufferBytes,
-                FileOptions.SequentialScan | FileOptions.Asynchronous))
-            {
-                fs.Seek(offset,SeekOrigin.Begin);
-                if(fs.Length!=offset)fs.SetLength(offset);
-
-    
+                FileOptions.SequentialScan | FileO

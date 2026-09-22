@@ -1,8 +1,4 @@
-ontStyle.Bold);
-            pinBox.BackColor = Color.FromArgb(255,252,232);
-            grid.Controls.Add(pinBox,1,1);
-
-            detectBtn = Btn("AUTO DETECT", Color.FromArgb(232,237,255), Blue);
+("AUTO DETECT", Color.FromArgb(232,237,255), Blue);
             detectBtn.Click += async (s,e) => await AutoDetectAsync();
             grid.Controls.Add(detectBtn,2,1);
 
@@ -112,7 +108,7 @@ ontStyle.Bold);
             destCard.Controls.Add(d);
 
             d.Controls.Add(L("DESTINATION ON THIS PC",9,Muted,true),0,0);
-            var turboNote=L("Universal Turbo • auto-negotiates Bundle v2 / Bulk v1 / HTTP resume",8.8f,Muted,false);
+            var turboNote=L("Universal Turbo • benchmark-free fallback • old/new server compatible",8.8f,Muted,false);
             turboNote.Dock=DockStyle.Fill;
             turboNote.TextAlign=ContentAlignment.MiddleRight;
             d.SetColumnSpan(turboNote,4);
@@ -163,7 +159,7 @@ ontStyle.Bold);
             bottom.SetColumnSpan(progress,3);
             bottom.Controls.Add(progress,0,0);
 
-            statusLabel=L("Ready. Universal Turbo v2.1 • cross-version compatible • OnePlus optimized.",9.5f,Muted,false);
+            statusLabel=L("Ready. Universal Turbo v2.2 • 404-safe • OnePlus optimized.",9.5f,Muted,false);
             statusLabel.Dock=DockStyle.Fill;
             statusLabel.TextAlign=ContentAlignment.MiddleLeft;
             statusLabel.AutoEllipsis=true;
@@ -203,4 +199,9 @@ ontStyle.Bold);
 
         Button Btn(string text, Color bg, Color fg)
         {
-            var b = new Button { Te
+            var b = new Button { Text=text, BackColor=bg, ForeColor=fg, FlatStyle=FlatStyle.Flat, Dock=DockStyle.Fill, Margin=new Padding(4,3,4,3), Font=new Font("Segoe UI",9.2f,FontStyle.Bold), Cursor=Cursors.Hand, UseVisualStyleBackColor=false };
+            b.FlatAppearance.BorderSize=0;
+            return b;
+        }
+
+        NumericUpD
