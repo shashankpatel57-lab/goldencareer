@@ -1,20 +1,4 @@
-sferAsync();
-            d.Controls.Add(startBtn,3,1);
-
-            cancelBtn=Btn("CANCEL",Color.FromArgb(255,236,238),Color.FromArgb(185,45,55));
-            cancelBtn.Enabled=false;
-            cancelBtn.Click+=(s,e)=>{ if(cts!=null) cts.Cancel(); };
-            d.Controls.Add(cancelBtn,4,1);
-
-            var bottom = new TableLayoutPanel {
-                Dock=DockStyle.Fill,
-                ColumnCount=3,
-                RowCount=2,
-                Padding=new Padding(2,8,2,0),
-                BackColor=Bg
-            };
-            bottom.RowStyles.Add(new RowStyle(SizeType.Absolute,28));
-            bottom.RowStyles.Add(new RowStyle(SizeType.Percent,100));
+les.Add(new RowStyle(SizeType.Percent,100));
             bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
             bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,150));
             bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,235));
@@ -141,4 +125,18 @@ sferAsync();
 
         async Task LoadFolderAsync(string path)
         {
-            if
+            if(Pin.Length!=6){SetStatus("Enter the 6-digit PIN shown on the phone.",true); return;}
+            ToggleConnect(false);
+            try
+            {
+                var r=await GetListAsync(path,CancellationToken.None);
+                currentPath=r.path??path??"";
+                pathLabel.Text=string.IsNullOrEmpty(currentPath)?"Internal storage":"Internal storage / "+currentPath;
+                remoteList.Items.Clear();
+                foreach(var x in (r.items??new PhoneItem[0]))
+                {
+                    var li=new ListViewItem(x.name); li.Tag=x;
+                    li.SubItems.Add(x.dir?"Folder":"File");
+                    li.SubItems.Add(x.dir?"—":FormatBytes(x.size));
+                    li.SubItems.Add(x.modified>0?DateTimeOffset.FromUnixTimeMilliseconds(x.modified).LocalDateTime.ToString("g"):"—");
+                    if(x.dir){li.ForeColor=Color.FromArgb(32,74,156); li.Font=new Font(remoteList.Font,Fo

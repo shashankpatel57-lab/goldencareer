@@ -1,4 +1,11 @@
-await ns.ReadAsync(buf,0,(int)Math.Min(buf.Length,bytes-got),token);
+ing line=await ReadAsciiLineAsync(ns,token);
+                    if(!line.StartsWith("OK "))throw new IOException("Turbo server: "+line);
+
+                    byte[] buf=new byte[1024*1024];
+                    long got=0;
+                    while(got<bytes)
+                    {
+                        int n=await ns.ReadAsync(buf,0,(int)Math.Min(buf.Length,bytes-got),token);
                         if(n<=0)break;
                         got+=n;
                     }

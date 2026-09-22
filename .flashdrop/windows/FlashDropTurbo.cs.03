@@ -1,18 +1,4 @@
-(Pin.Length!=6){SetStatus("Enter the 6-digit PIN shown on the phone.",true); return;}
-            ToggleConnect(false);
-            try
-            {
-                var r=await GetListAsync(path,CancellationToken.None);
-                currentPath=r.path??path??"";
-                pathLabel.Text=string.IsNullOrEmpty(currentPath)?"Internal storage":"Internal storage / "+currentPath;
-                remoteList.Items.Clear();
-                foreach(var x in (r.items??new PhoneItem[0]))
-                {
-                    var li=new ListViewItem(x.name); li.Tag=x;
-                    li.SubItems.Add(x.dir?"Folder":"File");
-                    li.SubItems.Add(x.dir?"—":FormatBytes(x.size));
-                    li.SubItems.Add(x.modified>0?DateTimeOffset.FromUnixTimeMilliseconds(x.modified).LocalDateTime.ToString("g"):"—");
-                    if(x.dir){li.ForeColor=Color.FromArgb(32,74,156); li.Font=new Font(remoteList.Font,FontStyle.Bold);}
+ntStyle.Bold);}
                     remoteList.Items.Add(li);
                 }
                 connectionLabel.Text="Connected"; connectionLabel.ForeColor=Green;
@@ -134,4 +120,38 @@
                             {
                                 File.Delete(f.PartPath);
                                 partial=0;
-        
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        partial=0;
+                    }
+
+                    alreadyDone+=partial;
+                    jobs.Enqueue(f);
+                }
+
+                Interlocked.Exchange(ref completedBytes,alreadyDone);
+                if(jobs.IsEmpty)
+                {
+                    SetStatus("Everything is already present at the destination.",false);
+                    progress.Value=1000;
+                    return;
+                }
+
+                SetStatus("Turbo v1.4 running — "+workers+" sequential file streams. No random chunk writes.",false);
+
+                var errors=new ConcurrentQueue<string>();
+                var tasks=new List<Task>();
+
+                for(int i=0;i<workers;i++)
+                {
+                    tasks.Add(Task.Run(async()=>{
+                        RemoteFile file;
+                        while(!token.IsCancellationRequested && jobs.TryDequeue(out file))
+                        {
+                            bool ok=false;
+                            Exception last=null;
+
+                            for(int attempt=1;attempt<=3 && !ok && !token.IsCancellationRequest

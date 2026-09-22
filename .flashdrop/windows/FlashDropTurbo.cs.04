@@ -1,38 +1,4 @@
-                    }
-                        }
-                    }
-                    catch
-                    {
-                        partial=0;
-                    }
-
-                    alreadyDone+=partial;
-                    jobs.Enqueue(f);
-                }
-
-                Interlocked.Exchange(ref completedBytes,alreadyDone);
-                if(jobs.IsEmpty)
-                {
-                    SetStatus("Everything is already present at the destination.",false);
-                    progress.Value=1000;
-                    return;
-                }
-
-                SetStatus("Turbo v1.4 running — "+workers+" sequential file streams. No random chunk writes.",false);
-
-                var errors=new ConcurrentQueue<string>();
-                var tasks=new List<Task>();
-
-                for(int i=0;i<workers;i++)
-                {
-                    tasks.Add(Task.Run(async()=>{
-                        RemoteFile file;
-                        while(!token.IsCancellationRequested && jobs.TryDequeue(out file))
-                        {
-                            bool ok=false;
-                            Exception last=null;
-
-                            for(int attempt=1;attempt<=3 && !ok && !token.IsCancellationRequested;attempt++)
+ed;attempt++)
                             {
                                 try
                                 {
@@ -84,7 +50,7 @@
             }
             catch(Exception ex)
             {
-                SetStatus("Transfer stopped: "+ex.Message,true);
+                SetStatus("Transfer stopped: "+ex.Message+"  (v1.5 automatically handles long Windows paths.)",true);
             }
             finally
             {
@@ -102,19 +68,39 @@
         {
             token.ThrowIfCancellationRequested();
             var list=await GetListAsync(remote,token);
+
             foreach(var x in (list.items??new PhoneItem[0]))
             {
                 token.ThrowIfCancellationRequested();
-                string safe=Sanitize(x.name);
+
+                string original=Sanitize(x.name);
+                string safe=CompactComponent(original,72);
                 string childRel=string.IsNullOrEmpty(rel)?safe:Path.Combine(rel,safe);
+
+                // Leave headroom for ".flashdrop.part" and old .NET/Win32 MAX_PATH behavior.
+                string candidate=Path.Combine(destRoot,childRel);
+                if(candidate.Length>205)
+                {
+                    string compact="_"+Hash8(x.path)+"_"+CompactComponent(original,44);
+                    childRel=Path.Combine("_LongPaths",compact);
+                    candidate=Path.Combine(destRoot,childRel);
+                }
+
+                if(candidate.Length>225)
+                {
+                    string compact="_"+Hash8(x.path)+"_"+CompactComponent(original,24);
+                    childRel=Path.Combine("_LP",compact);
+                    candidate=Path.Combine(destRoot,childRel);
+                }
+
                 if(x.dir)
                 {
-                    Directory.CreateDirectory(Path.Combine(destRoot,childRel));
+                    Directory.CreateDirectory(candidate);
                     await BuildManifestAsync(x.path,childRel,destRoot,files,token);
                 }
                 else
                 {
-                    var final=Path.Combine(destRoot,childRel);
+                    var final=candidate;
                     files.Add(new RemoteFile{
                         RemotePath=x.path,
                         RelativePath=childRel,
@@ -124,6 +110,42 @@
                         PartPath=final+".flashdrop.part"
                     });
                 }
+            }
+        }
+
+        static string CompactComponent(string name,int max)
+        {
+            if(string.IsNullOrEmpty(name))return "unnamed";
+            if(max<18)max=18;
+            if(name.Length<=max)return name;
+
+            string ext="";
+            string stem=name;
+            try
+            {
+                ext=Path.GetExtension(name);
+                if(ext.Length>12)ext="";
+                if(!string.IsNullOrEmpty(ext))stem=name.Substring(0,name.Length-ext.Length);
+            }
+            catch { ext=""; stem=name; }
+
+            string hash=Hash8(name);
+            int keep=Math.Max(6,max-hash.Length-ext.Length-2);
+            if(stem.Length>keep)stem=stem.Substring(0,keep);
+            return stem+"_"+hash+ext;
+        }
+
+        static string Hash8(string s)
+        {
+            unchecked
+            {
+                uint h=2166136261;
+                foreach(char c in (s??""))
+                {
+                    h^=c;
+                    h*=16777619;
+                }
+                return h.ToString("x8");
             }
         }
 
@@ -152,11 +174,4 @@
                         "FLASHDROP/1\nPIN "+Pin+"\nMODE BENCH\nBYTES "+bytes+"\n\n");
                     await ns.WriteAsync(hdr,0,hdr.Length,token);
 
-                    string line=await ReadAsciiLineAsync(ns,token);
-                    if(!line.StartsWith("OK "))throw new IOException("Turbo server: "+line);
-
-                    byte[] buf=new byte[1024*1024];
-                    long got=0;
-                    while(got<bytes)
-                    {
-                        int n=
+                    str

@@ -99,7 +99,7 @@ namespace FlashDropTurbo
 
         public MainForm()
         {
-            Text = "FlashDrop Turbo v1.4 - by Shashank Patel";
+            Text = "FlashDrop Turbo v1.5 - by Shashank Patel";
             StartPosition = FormStartPosition.CenterScreen;
             MinimumSize = new Size(1000, 720);
             Size = new Size(1180, 820);
@@ -172,4 +172,12 @@ namespace FlashDropTurbo
             grid.Controls.Add(L("PHONE HTTP ADDRESS",8.5f,Muted,true),0,0);
             grid.Controls.Add(L("6-DIGIT PIN",8.5f,Muted,true),1,0);
             grid.Controls.Add(L("WORKERS",8.5f,Muted,true),4,0);
- 
+            grid.Controls.Add(L("BUFFER MB",8.5f,Muted,true),5,0);
+
+            addressBox = Box();
+            addressBox.Text = "http://192.168.1.1:8080";
+            grid.Controls.Add(addressBox,0,1);
+
+            pinBox = Box();
+            pinBox.MaxLength = 6;
+            pinBox.TextAlign = HorizontalAlignm
