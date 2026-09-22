@@ -1,4 +1,4 @@
-name: Build FlashDrop APK
+name: Build FlashDrop v1.2
 
 on:
   push:
@@ -9,14 +9,51 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  windows-helper:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Reassemble Windows Turbo source
+        shell: powershell
+        run: |
+          $parts = Get-ChildItem ".flashdrop/windows/FlashDropTurbo.cs.*" | Sort-Object Name
+          $out = New-Object System.IO.StreamWriter("FlashDropTurbo.cs", $false, (New-Object System.Text.UTF8Encoding($false)))
+          foreach ($p in $parts) {
+            $out.Write([System.IO.File]::ReadAllText($p.FullName))
+          }
+          $out.Close()
+          Write-Host "Source bytes:" (Get-Item FlashDropTurbo.cs).Length
+
+      - name: Compile FlashDrop Turbo
+        shell: powershell
+        run: |
+          $csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+          if (!(Test-Path $csc)) { throw "C# compiler not found: $csc" }
+          & $csc /nologo /target:winexe /optimize+ /platform:anycpu /out:FlashDropTurbo.exe /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll FlashDropTurbo.cs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-FileHash FlashDropTurbo.exe -Algorithm SHA256
+          Write-Host "EXE bytes:" (Get-Item FlashDropTurbo.exe).Length
+
+      - name: Upload Windows Turbo helper
+        uses: actions/upload-artifact@v4
+        with:
+          name: FlashDrop-Turbo-Windows
+          path: FlashDropTurbo.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  android:
+    needs: windows-helper
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Checkout build branch
         uses: actions/checkout@v4
 
-      - name: Preserve direct-transfer patch
+      - name: Preserve v1.2 Android overlays
         shell: bash
         run: |
           mkdir -p /tmp/flashdrop-patch
@@ -31,15 +68,29 @@ jobs:
           echo "55354f1e7987b3051b2fcdba1985fb18ab7f2062820a90299222f236b3f7e1ab  /tmp/flashdrop-src.zip" | sha256sum -c -
           unzip -o /tmp/flashdrop-src.zip -d .
 
-      - name: Apply direct Windows Explorer mode
+      - name: Apply v1.2 Android overlays
         shell: bash
         run: |
           cp /tmp/flashdrop-patch/FileServerService.java tools/flashdrop/app/src/main/java/in/flashdrop/lan/
           cp /tmp/flashdrop-patch/MainActivity.java tools/flashdrop/app/src/main/java/in/flashdrop/lan/
           cp /tmp/flashdrop-patch/FtpFileServer.java tools/flashdrop/app/src/main/java/in/flashdrop/lan/
-          sed -i "s/versionCode 1/versionCode 2/" tools/flashdrop/app/build.gradle
-          sed -i "s/versionName '1.0.0'/versionName '1.1.0'/" tools/flashdrop/app/build.gradle
+          cat .flashdrop/android/HttpFileServer.java.gz.b64.* | tr -d '\n\r ' | base64 -d | gzip -dc > tools/flashdrop/app/src/main/java/in/flashdrop/lan/HttpFileServer.java
+          sed -i "s/versionCode 1/versionCode 3/" tools/flashdrop/app/build.gradle
+          sed -i "s/versionName '1.0.0'/versionName '1.2.0'/" tools/flashdrop/app/build.gradle
           sed -i 's/android:label="FlashDrop LAN"/android:label="FlashDrop Direct"/' tools/flashdrop/app/src/main/AndroidManifest.xml
+
+      - name: Download Windows Turbo helper into APK
+        uses: actions/download-artifact@v4
+        with:
+          name: FlashDrop-Turbo-Windows
+          path: tools/flashdrop/app/src/main/assets
+
+      - name: Verify embedded helper
+        shell: bash
+        run: |
+          test -s tools/flashdrop/app/src/main/assets/FlashDropTurbo.exe
+          file tools/flashdrop/app/src/main/assets/FlashDropTurbo.exe
+          sha256sum tools/flashdrop/app/src/main/assets/FlashDropTurbo.exe
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -52,20 +103,20 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Build debug APK
+      - name: Build Android APK
         working-directory: tools/flashdrop
         run: gradle :app:assembleDebug --no-daemon --stacktrace
 
       - name: Stage APK
         shell: bash
         run: |
-          cp tools/flashdrop/app/build/outputs/apk/debug/app-debug.apk FlashDrop-Direct-v1.1.apk
-          sha256sum FlashDrop-Direct-v1.1.apk
+          cp tools/flashdrop/app/build/outputs/apk/debug/app-debug.apk FlashDrop-Direct-v1.2.apk
+          sha256sum FlashDrop-Direct-v1.2.apk
 
-      - name: Upload APK artifact
+      - name: Upload Android APK
         uses: actions/upload-artifact@v4
         with:
-          name: FlashDrop-Direct-APK
-          path: FlashDrop-Direct-v1.1.apk
+          name: FlashDrop-Direct-v1.2-APK
+          path: FlashDrop-Direct-v1.2.apk
           if-no-files-found: error
           retention-days: 7
