@@ -1,4 +1,5 @@
-           grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,105));
+
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,105));
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,88));
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,92));
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,20));
@@ -176,4 +177,4 @@
                 Dock=DockStyle.Fill,
                 Style=ProgressBarStyle.Continuous,
                 Maximum=1000,
-                Marg
+                

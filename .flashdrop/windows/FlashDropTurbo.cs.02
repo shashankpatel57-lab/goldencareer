@@ -1,4 +1,4 @@
-in=new Padding(0,3,0,5)
+Margin=new Padding(0,3,0,5)
             };
             bottom.SetColumnSpan(progress,3);
             bottom.Controls.Add(progress,0,0);
@@ -166,4 +166,4 @@ in=new Padding(0,3,0,5)
         {
             if(remoteList.SelectedItems.Count==0)return;
             var x=remoteList.SelectedItems[0].Tag as PhoneItem;
-            if(x!
+           

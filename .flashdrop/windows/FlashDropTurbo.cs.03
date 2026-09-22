@@ -1,4 +1,4 @@
-=null && x.dir) await LoadFolderAsync(x.path);
+ if(x!=null && x.dir) await LoadFolderAsync(x.path);
         }
 
         async Task UpAsync()
@@ -212,4 +212,4 @@
             }
             catch{}
 
-            re
+      

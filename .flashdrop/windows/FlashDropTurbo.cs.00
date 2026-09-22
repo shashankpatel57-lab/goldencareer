@@ -234,4 +234,3 @@ namespace FlashDropTurbo
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,38));
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,100));
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,105));
- 

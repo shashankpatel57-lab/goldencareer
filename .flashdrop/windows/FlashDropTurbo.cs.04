@@ -1,4 +1,4 @@
-turn Math.Max(0,f.Size-partial);
+      return Math.Max(0,f.Size-partial);
         }
 
         async Task BuildManifestAsync(string remote,string rel,string destRoot,List<RemoteFile> files,CancellationToken token)
@@ -180,7 +180,7 @@ turn Math.Max(0,f.Size-partial);
                     catch(OperationCanceledException){throw;}
                     catch(Exception)
                     {
-                        await Task.Delay(250*attempts,token);
+                        Thread.Sleep(250*attempts);
                     }
                 }
             }
