@@ -1,4 +1,41 @@
-                  SetStatus("Connect to the phone first.", true);
+";
+                connectionLabel.ForeColor = Green;
+                SetStatus("Connected through the stable FTP engine. Double-click a folder or start copying the current folder tree.", false);
+            }
+            finally
+            {
+                ToggleConnect(true);
+            }
+        }
+
+        async Task OpenSelectedAsync()
+        {
+            if (remoteList.SelectedItems.Count == 0) return;
+            var x = remoteList.SelectedItems[0].Tag as FtpItem;
+            if (x != null && x.IsDirectory) await LoadFolderAsync(x.FullPath);
+        }
+
+        async Task UpAsync()
+        {
+            string p = NormalizeRemote(currentPath);
+            if (p == "/") { await LoadFolderAsync("/"); return; }
+
+            p = p.TrimEnd('/');
+            int i = p.LastIndexOf('/');
+            p = i <= 0 ? "/" : p.Substring(0, i);
+            await LoadFolderAsync(p);
+        }
+
+        async Task StartTransferAsync()
+        {
+            if (transferCts != null) return;
+
+            if (endpoint == null)
+            {
+                endpoint = await ResolveEndpointAsync(addressBox.Text);
+                if (endpoint == null)
+                {
+                    SetStatus("Connect to the phone first.", true);
                     return;
                 }
             }
@@ -38,7 +75,7 @@
                 totalBytes = files.Sum(f => f.Size);
                 totalLabel.Text = files.Count + " files • " + FormatBytes(totalBytes);
 
-                var queue = new ConcurrentQueue<RemoteFile>();
+                var pending = new List<RemoteFile>();
                 long already = 0;
 
                 foreach (var f in files)
@@ -48,11 +85,13 @@
 
                     if (f.Size == 0)
                     {
-                        if (!File.Exists(f.FinalPath)) File.WriteAllBytes(f.FinalPath, new byte[0]);
+                        if (!File.Exists(f.FinalPath))
+                            File.WriteAllBytes(f.FinalPath, new byte[0]);
                         continue;
                     }
 
-                    if (File.Exists(f.FinalPath) && new FileInfo(f.FinalPath).Length == f.Size)
+                    if (File.Exists(f.FinalPath) &&
+                        new FileInfo(f.FinalPath).Length == f.Size)
                     {
                         already += f.Size;
                         continue;
@@ -60,12 +99,12 @@
 
                     long part = SafePartLength(f);
                     already += part;
-                    queue.Enqueue(f);
+                    pending.Add(f);
                 }
 
                 Interlocked.Exchange(ref completedBytes, already);
 
-                if (queue.IsEmpty)
+                if (pending.Count == 0)
                 {
                     progress.Value = 1000;
                     SetStatus("Everything is already copied.", false);
@@ -76,77 +115,127 @@
                 speedSampleAt = DateTime.UtcNow;
                 speedTimer.Start();
 
-                int workers = Math.Max(1, Math.Min((int)workersBox.Value, queue.Count));
-                int bufferBytes = (int)bufferBox.Value * 1024 * 1024;
-                bufferBytes = Math.Max(512 * 1024, Math.Min(8 * 1024 * 1024, bufferBytes));
+                int workers = Math.Max(
+                    1,
+                    Math.Min((int)workersBox.Value, pending.Count));
+
+                int bufferBytes =
+                    (int)bufferBox.Value * 1024 * 1024;
+
+                bufferBytes = Math.Max(
+                    512 * 1024,
+                    Math.Min(8 * 1024 * 1024, bufferBytes));
+
+                var lanes = new List<List<RemoteFile>>();
+
+                for (int i = 0; i < workers; i++)
+                    lanes.Add(new List<RemoteFile>());
+
+                // Round-robin is intentionally used here. For folders with
+                // thousands of tiny files it keeps every stream busy instead
+                // of allowing one lane to get stuck doing all metadata work.
+                for (int i = 0; i < pending.Count; i++)
+                    lanes[i % workers].Add(pending[i]);
 
                 SetStatus(
-                    "Turbo 3.1 running — " + workers +
-                    " persistent XFD1 streams on FTP port " + endpoint.Port +
-                    " • no per-file reconnects.",
+                    "Turbo 4 running — " + workers +
+                    " XFD2 packed lanes • up to 500 files per batch • no per-file network transaction.",
                     false);
 
                 var errors = new ConcurrentQueue<string>();
                 var tasks = new List<Task>();
 
-                for (int w = 0; w < workers; w++)
+                foreach (var lane in lanes)
                 {
+                    var captured = lane;
+
                     tasks.Add(Task.Run(async () =>
                     {
-                        FtpSession ftp = null;
+                        int cursor = 0;
 
-                        try
+                        while (cursor < captured.Count)
                         {
-                            RemoteFile file;
+                            token.ThrowIfCancellationRequested();
 
-                            while (!token.IsCancellationRequested && queue.TryDequeue(out file))
+                            int take = Math.Min(
+                                500,
+                                captured.Count - cursor);
+
+                            var batch = captured.GetRange(
+                                cursor,
+                                take);
+
+                            bool ok = false;
+                            Exception last = null;
+
+                            for (int attempt = 1;
+                                 attempt <= 4 && !ok;
+                                 attempt++)
                             {
-                                bool ok = false;
-                                Exception last = null;
+                                FtpSession ftp = null;
 
-                                for (int attempt = 1; attempt <= 4 && !ok; attempt++)
+                                try
+                                {
+                                    ftp = new FtpSession(
+                                        endpoint.Host,
+                                        endpoint.Port,
+                                        true);
+
+                                    await ftp.ConnectAsync(token);
+
+                                    if (!ftp.PackedActive)
+                                        throw new IOException(
+                                            "Phone server does not support XFD2 packed mode");
+
+                                    await ftp.DownloadBatchAsync(
+                                        batch,
+                                        bufferBytes,
+                                        token,
+                                        n => Interlocked.Add(
+                                            ref completedBytes,
+                                            n));
+
+                                    ok = true;
+                                }
+                                catch (OperationCanceledException)
+                                {
+                                    throw;
+                                }
+                                catch (Exception ex)
+                                {
+                                    last = ex;
+
+                                    if (attempt < 4)
+                                        Thread.Sleep(250 * attempt);
+                                }
+                                finally
                                 {
                                     try
                                     {
-                                        if (ftp == null)
-                                        {
-                                            ftp = new FtpSession(endpoint.Host, endpoint.Port, true);
-                                            await ftp.ConnectAsync(token);
-                                        }
-
-                                        long offset = SafePartLength(file);
-
-                                        await ftp.DownloadAsync(
-                                            file.RemotePath,
-                                            file.PartPath,
-                                            file.Size,
-                                            offset,
-                                            bufferBytes,
-                                            token,
-                                            n => Interlocked.Add(ref completedBytes, n));
-
-                                        FinalizeFile(file);
-                                        ok = true;
+                                        if (ftp != null)
+                                            ftp.Dispose();
                                     }
-                                    catch (OperationCanceledException) { throw; }
-                                    catch (Exception ex)
-                                    {
-                                        last = ex;
-                                        try { if (ftp != null) ftp.Dispose(); } catch { }
-                                        ftp = null;
+                                    catch { }
+                                }
+                            }
 
-                                        if (attempt < 4)
-                                            Thread.Sleep(250 * attempt);
+                            if (!ok)
+                            {
+                                foreach (var f in batch)
+                                {
+                                    if (!(File.Exists(f.FinalPath) &&
+                                          new FileInfo(f.FinalPath).Length == f.Size))
+                                    {
+                                        errors.Enqueue(
+                                            f.RemotePath + " : " +
+                                            (last == null
+                                                ? "packed transfer failed"
+                                                : last.Message));
                                     }
                                 }
-
-                                if (!ok)
-                                    errors.Enqueue(file.RemotePath + " : " + (last == null ? "transfer failed" : last.Message));
                             }
-                        }
-                        finally
-                        {
-                            try { if (ftp != null) ftp.Dispose(); } catch { }
+
+                            cursor += take;
                         }
                     }, token));
                 }
@@ -233,40 +322,4 @@
                 if (local.Length > 205)
                 {
                     string compact = "_" + Hash8(x.FullPath) + "_" + CompactComponent(safe, 42);
-                    rel = Path.Combine("_LongPaths", compact);
-                    local = Path.Combine(destRoot, rel);
-                }
-
-                if (local.Length > 225)
-                {
-                    string compact = "_" + Hash8(x.FullPath) + "_" + CompactComponent(safe, 22);
-                    rel = Path.Combine("_LP", compact);
-                    local = Path.Combine(destRoot, rel);
-                }
-
-                if (x.IsDirectory)
-                {
-                    Directory.CreateDirectory(local);
-                    await BuildManifestAsync(ftp, x.FullPath, rel, destRoot, files, token);
-                }
-                else
-                {
-                    files.Add(new RemoteFile
-                    {
-                        RemotePath = x.FullPath,
-                        FinalPath = local,
-                        PartPath = local + ".flashdrop.part",
-                        Size = x.Size,
-                        ModifiedUtc = x.ModifiedUtc
-                    });
-                }
-            }
-        }
-
-        void FinalizeFile(RemoteFile file)
-        {
-            long size = File.Exists(file.PartPath) ? new FileInfo(file.PartPath).Length : 0;
-            if (size != file.Size) throw new IOException("Incomplete local file " + size + "/" + file.Size);
-
-            if (File.Exists(file.FinalPath)) File.Delete(file.FinalPath);
-            File.Move(file.PartPath, file.FinalP
+             

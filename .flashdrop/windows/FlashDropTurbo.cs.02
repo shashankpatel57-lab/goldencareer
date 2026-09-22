@@ -1,4 +1,122 @@
-= b.IsDirectory)
+        }
+
+        static async Task<int> ReadWithTimeoutAsync(
+            Stream input,
+            byte[] buffer,
+            int offset,
+            int count,
+            int timeoutMs,
+            CancellationToken token)
+        {
+            var task = input.ReadAsync(buffer, offset, count, token);
+            var winner = await Task.WhenAny(task, Task.Delay(timeoutMs, token));
+
+            if (winner != task)
+            {
+                token.ThrowIfCancellationRequested();
+                throw new IOException(
+                    "No data received for " +
+                    (timeoutMs / 1000) +
+                    " seconds");
+            }
+
+            return await task;
+        }
+
+        static async Task ConnectTcpAsync(
+            TcpClient client,
+            string host,
+            int port,
+            int timeoutMs,
+            CancellationToken token)
+        {
+            var task = client.ConnectAsync(host, port);
+            var winner = await Task.WhenAny(task, Task.Delay(timeoutMs, token));
+
+            if (winner != task)
+            {
+                try { client.Close(); } catch { }
+                token.ThrowIfCancellationRequested();
+                throw new IOException("Connection timed out");
+            }
+
+            await task;
+        }
+
+        static List<FtpItem> ParseMlsd(string text, string parent)
+        {
+            var items = new List<FtpItem>();
+
+            using (var sr = new StringReader(text ?? ""))
+            {
+                string line;
+
+                while ((line = sr.ReadLine()) != null)
+                {
+                    line = line.TrimEnd('\r', '\n');
+
+                    if (line.Length == 0) continue;
+
+                    int space = line.IndexOf(' ');
+                    if (space < 0) continue;
+
+                    string facts = line.Substring(0, space);
+                    string name = line.Substring(space + 1);
+
+                    if (name.Length == 0 || name == "." || name == "..")
+                        continue;
+
+                    bool dir = false;
+                    long size = 0;
+                    DateTime modified = DateTime.MinValue;
+
+                    string[] fs = facts.Split(';');
+
+                    foreach (string f in fs)
+                    {
+                        int eq = f.IndexOf('=');
+                        if (eq <= 0) continue;
+
+                        string key = f.Substring(0, eq).Trim().ToLowerInvariant();
+                        string val = f.Substring(eq + 1).Trim();
+
+                        if (key == "type")
+                            dir = val.Equals("dir", StringComparison.OrdinalIgnoreCase);
+                        else if (key == "size")
+                            long.TryParse(
+                                val,
+                                NumberStyles.Integer,
+                                CultureInfo.InvariantCulture,
+                                out size);
+                        else if (key == "modify")
+                        {
+                            DateTime dt;
+
+                            if (DateTime.TryParseExact(
+                                val,
+                                "yyyyMMddHHmmss",
+                                CultureInfo.InvariantCulture,
+                                DateTimeStyles.AssumeUniversal |
+                                DateTimeStyles.AdjustToUniversal,
+                                out dt))
+                                modified = dt;
+                        }
+                    }
+
+                    items.Add(new FtpItem
+                    {
+                        Name = name,
+                        FullPath = CombineRemote(parent, name),
+                        IsDirectory = dir,
+                        Size = dir ? 0 : size,
+                        ModifiedUtc = modified
+                    });
+                }
+            }
+
+            items.Sort((a, b) =>
+            {
+                if (a.IsDirectory != b.IsDirectory)
                     return a.IsDirectory ? -1 : 1;
 
                 return string.Compare(
@@ -52,6 +170,7 @@
         void DisposeControl()
         {
             turboActive = false;
+            packedActive = false;
 
             try { if (writer != null) writer.Dispose(); } catch { }
             try { if (control != null) control.Close(); } catch { }
@@ -105,7 +224,7 @@
 
         public MainForm()
         {
-            Text = "FlashDrop Turbo v3.1 - Persistent Stream - by Shashank Patel";
+            Text = "FlashDrop Turbo v4.0 - Packed Folder Engine - by Shashank Patel";
             StartPosition = FormStartPosition.CenterScreen;
             MinimumSize = new Size(1000, 720);
             Size = new Size(1180, 820);
@@ -142,7 +261,7 @@
             title.Location = new Point(26, 14);
             hero.Controls.Add(title);
 
-            var sub = LabelX("Persistent Turbo on the proven FTP port • no per-file socket reconnects", 11.5f, Color.FromArgb(239, 246, 255), false);
+            var sub = LabelX("Packed-folder Turbo • hundreds of files per batch • optimized for huge folders", 11.5f, Color.FromArgb(239, 246, 255), false);
             sub.Location = new Point(28, 51);
             hero.Controls.Add(sub);
 
@@ -189,10 +308,10 @@
             connectBtn.Click += async (s, e) => await ConnectAndLoadAsync();
             g.Controls.Add(connectBtn, 2, 1);
 
-            workersBox = Num(1, 8, 4);
+            workersBox = Num(1, 8, 6);
             g.Controls.Add(workersBox, 3, 1);
 
-            bufferBox = Num(1, 8, 2);
+            bufferBox = Num(1, 8, 1);
             g.Controls.Add(bufferBox, 4, 1);
 
             connectionLabel = LabelX("Waiting for phone...", 9.5f, Muted, true);
@@ -213,63 +332,4 @@
             var browser = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                ColumnCount = 1,
-                RowCount = 2,
-                BackColor = Color.White
-            };
-            browser.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
-            browser.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            browserCard.Controls.Add(browser);
-
-            var nav = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                ColumnCount = 4,
-                RowCount = 1,
-                Padding = new Padding(12, 8, 12, 6),
-                BackColor = Color.FromArgb(249, 250, 253)
-            };
-            nav.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 80));
-            nav.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100));
-            nav.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            nav.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 175));
-            browser.Controls.Add(nav, 0, 0);
-
-            upBtn = Btn("UP", Color.FromArgb(240, 244, 250), Ink);
-            upBtn.Click += async (s, e) => await UpAsync();
-            nav.Controls.Add(upBtn, 0, 0);
-
-            refreshBtn = Btn("REFRESH", Color.FromArgb(240, 244, 250), Ink);
-            refreshBtn.Click += async (s, e) => await LoadFolderAsync(currentPath);
-            nav.Controls.Add(refreshBtn, 1, 0);
-
-            pathLabel = LabelX("Internal storage", 10, Ink, true);
-            pathLabel.Dock = DockStyle.Fill;
-            pathLabel.TextAlign = ContentAlignment.MiddleLeft;
-            pathLabel.AutoEllipsis = true;
-            nav.Controls.Add(pathLabel, 2, 0);
-
-            var browseHint = LabelX("Double-click folder to open", 8.8f, Muted, false);
-            browseHint.Dock = DockStyle.Fill;
-            browseHint.TextAlign = ContentAlignment.MiddleRight;
-            nav.Controls.Add(browseHint, 3, 0);
-
-            remoteList = new ListView
-            {
-                Dock = DockStyle.Fill,
-                View = View.Details,
-                FullRowSelect = true,
-                HideSelection = false,
-                BorderStyle = BorderStyle.None,
-                BackColor = Color.White,
-                Font = new Font("Segoe UI", 9.5f)
-            };
-            remoteList.Columns.Add("Name", 520);
-            remoteList.Columns.Add("Type", 105);
-            remoteList.Columns.Add("Size", 125);
-            remoteList.Columns.Add("Modified", 180);
-            remoteList.DoubleClick += async (s, e) => await OpenSelectedAsync();
-            browser.Controls.Add(remoteList, 0, 1);
-
-            var destCard = Card();
-            destCard.Margin = new Padding(0, 0, 0, 1
+            

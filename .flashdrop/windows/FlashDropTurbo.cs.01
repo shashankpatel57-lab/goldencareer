@@ -1,4 +1,172 @@
- " + start.Text);
+nalPath))
+                File.Delete(file.FinalPath);
+
+            File.Move(file.PartPath, file.FinalPath);
+
+            if (file.ModifiedUtc != DateTime.MinValue)
+            {
+                try
+                {
+                    File.SetLastWriteTimeUtc(
+                        file.FinalPath,
+                        file.ModifiedUtc);
+                }
+                catch { }
+            }
+        }
+
+        public async Task DownloadAsync(
+            string remotePath,
+            string localPartPath,
+            long expectedSize,
+            long offset,
+            int bufferBytes,
+            CancellationToken token,
+            Action<int> onBytes)
+        {
+            EnsureConnected();
+
+            if (packedActive)
+                throw new IOException("Use packed batch transfer for XFD2");
+
+            if (turboActive)
+            {
+                await DownloadPersistentTurboAsync(
+                    remotePath,
+                    localPartPath,
+                    expectedSize,
+                    offset,
+                    bufferBytes,
+                    token,
+                    onBytes);
+                return;
+            }
+
+            await DownloadStandardFtpAsync(
+                remotePath,
+                localPartPath,
+                expectedSize,
+                offset,
+                bufferBytes,
+                token,
+                onBytes);
+        }
+
+        async Task DownloadPersistentTurboAsync(
+            string remotePath,
+            string localPartPath,
+            long expectedSize,
+            long offset,
+            int bufferBytes,
+            CancellationToken token,
+            Action<int> onBytes)
+        {
+            string encoded = Convert.ToBase64String(
+                Encoding.UTF8.GetBytes(NormalizeRemote(remotePath)));
+
+            await writer.WriteLineAsync(
+                "GET " +
+                offset.ToString(CultureInfo.InvariantCulture) +
+                " 0 " +
+                encoded);
+            await writer.FlushAsync();
+
+            var start = await ReadResponseAsync(15000, token);
+
+            if (start.Code != 150)
+                throw new IOException("Turbo GET failed: " + start.Text);
+
+            string[] p = start.Text.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+
+            if (p.Length < 3)
+                throw new IOException("Invalid Turbo header: " + start.Text);
+
+            long length;
+            long total;
+
+            if (!long.TryParse(p[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out length) ||
+                !long.TryParse(p[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out total))
+                throw new IOException("Invalid Turbo file size header");
+
+            if (total != expectedSize)
+                throw new IOException("Phone file size changed: " + total + " / " + expectedSize);
+
+            if (offset + length != expectedSize)
+                throw new IOException("Unexpected Turbo range length");
+
+            EnsureTransferBuffer(bufferBytes);
+
+            Directory.CreateDirectory(Path.GetDirectoryName(localPartPath));
+
+            using (var fs = new FileStream(
+                localPartPath,
+                FileMode.OpenOrCreate,
+                FileAccess.Write,
+                FileShare.Read,
+                bufferBytes,
+                FileOptions.SequentialScan))
+            {
+                fs.Seek(offset, SeekOrigin.Begin);
+
+                if (fs.Length != offset)
+                    fs.SetLength(offset);
+
+                long got = 0;
+
+                while (got < length)
+                {
+                    token.ThrowIfCancellationRequested();
+
+                    int want = (int)Math.Min(transferBuffer.Length, length - got);
+                    int n = await ReadWithTimeoutAsync(
+                        stream,
+                        transferBuffer,
+                        0,
+                        want,
+                        20000,
+                        token);
+
+                    if (n <= 0)
+                        throw new IOException("Turbo stream closed early");
+
+                    fs.Write(transferBuffer, 0, n);
+                    got += n;
+
+                    if (onBytes != null)
+                        onBytes(n);
+                }
+            }
+
+            var finish = await ReadResponseAsync(12000, token);
+
+            if (finish.Code != 226)
+                throw new IOException("Turbo file did not finish: " + finish.Text);
+        }
+
+        async Task DownloadStandardFtpAsync(
+            string remotePath,
+            string localPartPath,
+            long expectedSize,
+            long offset,
+            int bufferBytes,
+            CancellationToken token,
+            Action<int> onBytes)
+        {
+            using (var data = await OpenPassiveAsync(token))
+            {
+                if (offset > 0)
+                {
+                    var rest = await CommandAsync(
+                        "REST " + offset.ToString(CultureInfo.InvariantCulture),
+                        token);
+                    Expect(rest, 350);
+                }
+
+                string path = NormalizeRemote(remotePath);
+                var start = await CommandAsync("RETR " + path, token);
+
+                if (start.Code != 150 && start.Code != 125)
+                    throw new IOException("Cannot download " + path + ": " + start.Text);
 
                 data.ReceiveBufferSize = 4 * 1024 * 1024;
                 data.NoDelay = true;
@@ -191,122 +359,3 @@
             }
 
             return Encoding.UTF8.GetString(bytes.ToArray());
-        }
-
-        static async Task<int> ReadWithTimeoutAsync(
-            Stream input,
-            byte[] buffer,
-            int offset,
-            int count,
-            int timeoutMs,
-            CancellationToken token)
-        {
-            var task = input.ReadAsync(buffer, offset, count, token);
-            var winner = await Task.WhenAny(task, Task.Delay(timeoutMs, token));
-
-            if (winner != task)
-            {
-                token.ThrowIfCancellationRequested();
-                throw new IOException(
-                    "No data received for " +
-                    (timeoutMs / 1000) +
-                    " seconds");
-            }
-
-            return await task;
-        }
-
-        static async Task ConnectTcpAsync(
-            TcpClient client,
-            string host,
-            int port,
-            int timeoutMs,
-            CancellationToken token)
-        {
-            var task = client.ConnectAsync(host, port);
-            var winner = await Task.WhenAny(task, Task.Delay(timeoutMs, token));
-
-            if (winner != task)
-            {
-                try { client.Close(); } catch { }
-                token.ThrowIfCancellationRequested();
-                throw new IOException("Connection timed out");
-            }
-
-            await task;
-        }
-
-        static List<FtpItem> ParseMlsd(string text, string parent)
-        {
-            var items = new List<FtpItem>();
-
-            using (var sr = new StringReader(text ?? ""))
-            {
-                string line;
-
-                while ((line = sr.ReadLine()) != null)
-                {
-                    line = line.TrimEnd('\r', '\n');
-
-                    if (line.Length == 0) continue;
-
-                    int space = line.IndexOf(' ');
-                    if (space < 0) continue;
-
-                    string facts = line.Substring(0, space);
-                    string name = line.Substring(space + 1);
-
-                    if (name.Length == 0 || name == "." || name == "..")
-                        continue;
-
-                    bool dir = false;
-                    long size = 0;
-                    DateTime modified = DateTime.MinValue;
-
-                    string[] fs = facts.Split(';');
-
-                    foreach (string f in fs)
-                    {
-                        int eq = f.IndexOf('=');
-                        if (eq <= 0) continue;
-
-                        string key = f.Substring(0, eq).Trim().ToLowerInvariant();
-                        string val = f.Substring(eq + 1).Trim();
-
-                        if (key == "type")
-                            dir = val.Equals("dir", StringComparison.OrdinalIgnoreCase);
-                        else if (key == "size")
-                            long.TryParse(
-                                val,
-                                NumberStyles.Integer,
-                                CultureInfo.InvariantCulture,
-                                out size);
-                        else if (key == "modify")
-                        {
-                            DateTime dt;
-
-                            if (DateTime.TryParseExact(
-                                val,
-                                "yyyyMMddHHmmss",
-                                CultureInfo.InvariantCulture,
-                                DateTimeStyles.AssumeUniversal |
-                                DateTimeStyles.AdjustToUniversal,
-                                out dt))
-                                modified = dt;
-                        }
-                    }
-
-                    items.Add(new FtpItem
-                    {
-                        Name = name,
-                        FullPath = CombineRemote(parent, name),
-                        IsDirectory = dir,
-                        Size = dir ? 0 : size,
-                        ModifiedUtc = modified
-                    });
-                }
-            }
-
-            items.Sort((a, b) =>
-            {
-                if (a.IsDirectory !

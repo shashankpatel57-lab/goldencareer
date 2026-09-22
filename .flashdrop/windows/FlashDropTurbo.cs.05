@@ -1,4 +1,40 @@
-ath);
+       rel = Path.Combine("_LongPaths", compact);
+                    local = Path.Combine(destRoot, rel);
+                }
+
+                if (local.Length > 225)
+                {
+                    string compact = "_" + Hash8(x.FullPath) + "_" + CompactComponent(safe, 22);
+                    rel = Path.Combine("_LP", compact);
+                    local = Path.Combine(destRoot, rel);
+                }
+
+                if (x.IsDirectory)
+                {
+                    Directory.CreateDirectory(local);
+                    await BuildManifestAsync(ftp, x.FullPath, rel, destRoot, files, token);
+                }
+                else
+                {
+                    files.Add(new RemoteFile
+                    {
+                        RemotePath = x.FullPath,
+                        FinalPath = local,
+                        PartPath = local + ".flashdrop.part",
+                        Size = x.Size,
+                        ModifiedUtc = x.ModifiedUtc
+                    });
+                }
+            }
+        }
+
+        void FinalizeFile(RemoteFile file)
+        {
+            long size = File.Exists(file.PartPath) ? new FileInfo(file.PartPath).Length : 0;
+            if (size != file.Size) throw new IOException("Incomplete local file " + size + "/" + file.Size);
+
+            if (File.Exists(file.FinalPath)) File.Delete(file.FinalPath);
+            File.Move(file.PartPath, file.FinalPath);
 
             if (file.ModifiedUtc != DateTime.MinValue)
             {
@@ -32,7 +68,7 @@ ath);
             long delta = Math.Max(0, nowBytes - speedSampleBytes);
             double instant = delta / 1048576d / seconds;
 
-            smoothedMbps = smoothedMbps <= 0 ? instant : smoothedMbps * 0.65 + instant * 0.35;
+            smoothedMbps = smoothedMbps <= 0 ? instant : smoothedMbps * 0.72 + instant * 0.28;
             speedSampleBytes = nowBytes;
             speedSampleAt = now;
 

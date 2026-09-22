@@ -82,6 +82,7 @@ namespace FlashDropTurbo
         NetworkStream stream;
         StreamWriter writer;
         bool turboActive;
+        bool packedActive;
         byte[] transferBuffer;
 
         public FtpSession(string host, int port, bool preferTurbo)
@@ -92,6 +93,7 @@ namespace FlashDropTurbo
         }
 
         public bool TurboActive { get { return turboActive; } }
+        public bool PackedActive { get { return packedActive; } }
 
         public async Task ConnectAsync(CancellationToken token)
         {
@@ -132,12 +134,22 @@ namespace FlashDropTurbo
             Expect(t, 200);
 
             turboActive = false;
+            packedActive = false;
 
             if (preferTurbo)
             {
-                var x = await CommandAsync("XFD1", token);
-                if (x.Code == 200)
-                    turboActive = true;
+                var p2 = await CommandAsync("XFD2", token);
+
+                if (p2.Code == 200)
+                {
+                    packedActive = true;
+                }
+                else
+                {
+                    var x = await CommandAsync("XFD1", token);
+                    if (x.Code == 200)
+                        turboActive = true;
+                }
             }
         }
 
@@ -145,7 +157,7 @@ namespace FlashDropTurbo
         {
             EnsureConnected();
 
-            if (turboActive)
+            if (turboActive || packedActive)
                 throw new IOException("Folder listing is not available inside Turbo stream mode");
 
             using (var data = await OpenPassiveAsync(token))
@@ -180,152 +192,184 @@ namespace FlashDropTurbo
             }
         }
 
-        public async Task DownloadAsync(
-            string remotePath,
-            string localPartPath,
-            long expectedSize,
-            long offset,
+        public async Task DownloadBatchAsync(
+            List<RemoteFile> files,
             int bufferBytes,
             CancellationToken token,
             Action<int> onBytes)
         {
             EnsureConnected();
 
-            if (turboActive)
-            {
-                await DownloadPersistentTurboAsync(
-                    remotePath,
-                    localPartPath,
-                    expectedSize,
-                    offset,
-                    bufferBytes,
-                    token,
-                    onBytes);
+            if (!packedActive)
+                throw new IOException("Packed stream mode is not active");
+
+            if (files == null || files.Count == 0)
                 return;
-            }
 
-            await DownloadStandardFtpAsync(
-                remotePath,
-                localPartPath,
-                expectedSize,
-                offset,
-                bufferBytes,
-                token,
-                onBytes);
-        }
-
-        async Task DownloadPersistentTurboAsync(
-            string remotePath,
-            string localPartPath,
-            long expectedSize,
-            long offset,
-            int bufferBytes,
-            CancellationToken token,
-            Action<int> onBytes)
-        {
-            string encoded = Convert.ToBase64String(
-                Encoding.UTF8.GetBytes(NormalizeRemote(remotePath)));
+            if (files.Count > 2000)
+                throw new IOException("Packed batch is too large");
 
             await writer.WriteLineAsync(
-                "GET " +
-                offset.ToString(CultureInfo.InvariantCulture) +
-                " 0 " +
-                encoded);
+                "BATCH " + files.Count.ToString(CultureInfo.InvariantCulture));
+
+            long[] offsets = new long[files.Count];
+
+            for (int i = 0; i < files.Count; i++)
+            {
+                var f = files[i];
+                long offset = SafePartLengthLocal(f);
+                offsets[i] = offset;
+
+                string encoded = Convert.ToBase64String(
+                    Encoding.UTF8.GetBytes(NormalizeRemote(f.RemotePath)));
+
+                await writer.WriteLineAsync(
+                    offset.ToString(CultureInfo.InvariantCulture) +
+                    " " +
+                    encoded);
+            }
+
             await writer.FlushAsync();
 
-            var start = await ReadResponseAsync(15000, token);
+            var begin = await ReadResponseAsync(20000, token);
 
-            if (start.Code != 150)
-                throw new IOException("Turbo GET failed: " + start.Text);
-
-            string[] p = start.Text.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-
-            if (p.Length < 3)
-                throw new IOException("Invalid Turbo header: " + start.Text);
-
-            long length;
-            long total;
-
-            if (!long.TryParse(p[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out length) ||
-                !long.TryParse(p[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out total))
-                throw new IOException("Invalid Turbo file size header");
-
-            if (total != expectedSize)
-                throw new IOException("Phone file size changed: " + total + " / " + expectedSize);
-
-            if (offset + length != expectedSize)
-                throw new IOException("Unexpected Turbo range length");
+            if (begin.Code != 150)
+                throw new IOException("Packed batch rejected: " + begin.Text);
 
             EnsureTransferBuffer(bufferBytes);
 
-            Directory.CreateDirectory(Path.GetDirectoryName(localPartPath));
-
-            using (var fs = new FileStream(
-                localPartPath,
-                FileMode.OpenOrCreate,
-                FileAccess.Write,
-                FileShare.Read,
-                bufferBytes,
-                FileOptions.SequentialScan))
+            for (int i = 0; i < files.Count; i++)
             {
-                fs.Seek(offset, SeekOrigin.Begin);
+                token.ThrowIfCancellationRequested();
 
-                if (fs.Length != offset)
-                    fs.SetLength(offset);
+                var header = await ReadResponseAsync(20000, token);
 
-                long got = 0;
+                if (header.Code == 550)
+                    throw new IOException("Phone file unavailable: " + files[i].RemotePath);
 
-                while (got < length)
+                if (header.Code != 151)
+                    throw new IOException("Invalid packed file header: " + header.Text);
+
+                string[] p = header.Text.Split(
+                    new[] { ' ' },
+                    StringSplitOptions.RemoveEmptyEntries);
+
+                if (p.Length < 4)
+                    throw new IOException("Invalid packed file header: " + header.Text);
+
+                int index;
+                long length;
+                long total;
+
+                if (!int.TryParse(p[1], out index) ||
+                    !long.TryParse(p[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out length) ||
+                    !long.TryParse(p[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out total))
+                    throw new IOException("Invalid packed file metadata");
+
+                if (index != i)
+                    throw new IOException("Packed stream file order mismatch");
+
+                var file = files[i];
+
+                if (total != file.Size)
+                    throw new IOException("Phone file size changed: " + file.RemotePath);
+
+                long offset = offsets[i];
+
+                if (offset + length != total)
+                    throw new IOException("Packed resume range mismatch: " + file.RemotePath);
+
+                Directory.CreateDirectory(Path.GetDirectoryName(file.PartPath));
+
+                using (var fs = new FileStream(
+                    file.PartPath,
+                    FileMode.OpenOrCreate,
+                    FileAccess.Write,
+                    FileShare.Read,
+                    bufferBytes,
+                    FileOptions.SequentialScan))
                 {
-                    token.ThrowIfCancellationRequested();
+                    fs.Seek(offset, SeekOrigin.Begin);
 
-                    int want = (int)Math.Min(transferBuffer.Length, length - got);
-                    int n = await ReadWithTimeoutAsync(
-                        stream,
-                        transferBuffer,
-                        0,
-                        want,
-                        20000,
-                        token);
+                    if (fs.Length != offset)
+                        fs.SetLength(offset);
 
-                    if (n <= 0)
-                        throw new IOException("Turbo stream closed early");
+                    long got = 0;
 
-                    fs.Write(transferBuffer, 0, n);
-                    got += n;
+                    while (got < length)
+                    {
+                        token.ThrowIfCancellationRequested();
 
-                    if (onBytes != null)
-                        onBytes(n);
+                        int want = (int)Math.Min(
+                            transferBuffer.Length,
+                            length - got);
+
+                        int n = await ReadWithTimeoutAsync(
+                            stream,
+                            transferBuffer,
+                            0,
+                            want,
+                            30000,
+                            token);
+
+                        if (n <= 0)
+                            throw new IOException(
+                                "Packed stream closed during " +
+                                file.RemotePath);
+
+                        fs.Write(transferBuffer, 0, n);
+                        got += n;
+
+                        if (onBytes != null)
+                            onBytes(n);
+                    }
                 }
+
+                var end = await ReadResponseAsync(15000, token);
+
+                if (end.Code != 152)
+                    throw new IOException("Packed file did not finish: " + end.Text);
+
+                FinalizeLocalFile(file);
             }
 
-            var finish = await ReadResponseAsync(12000, token);
+            var done = await ReadResponseAsync(15000, token);
 
-            if (finish.Code != 226)
-                throw new IOException("Turbo file did not finish: " + finish.Text);
+            if (done.Code != 226)
+                throw new IOException("Packed batch did not finish: " + done.Text);
         }
 
-        async Task DownloadStandardFtpAsync(
-            string remotePath,
-            string localPartPath,
-            long expectedSize,
-            long offset,
-            int bufferBytes,
-            CancellationToken token,
-            Action<int> onBytes)
+        static long SafePartLengthLocal(RemoteFile f)
         {
-            using (var data = await OpenPassiveAsync(token))
+            try
             {
-                if (offset > 0)
+                if (!File.Exists(f.PartPath)) return 0;
+
+                long n = new FileInfo(f.PartPath).Length;
+
+                if (n < 0 || n > f.Size)
                 {
-                    var rest = await CommandAsync(
-                        "REST " + offset.ToString(CultureInfo.InvariantCulture),
-                        token);
-                    Expect(rest, 350);
+                    File.Delete(f.PartPath);
+                    return 0;
                 }
 
-                string path = NormalizeRemote(remotePath);
-                var start = await CommandAsync("RETR " + path, token);
+                return n;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
 
-                if (start.Code != 150 && start.Code != 125)
-                    throw new IOException("Cannot download " + path + ":
+        static void FinalizeLocalFile(RemoteFile file)
+        {
+            long size = File.Exists(file.PartPath)
+                ? new FileInfo(file.PartPath).Length
+                : 0;
+
+            if (size != file.Size)
+                throw new IOException(
+                    "Incomplete local file " +
+                    size + "/" + file.Size);
+
+            if (File.Exists(file.Fi

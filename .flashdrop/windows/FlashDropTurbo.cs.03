@@ -1,4 +1,63 @@
-0);
+    ColumnCount = 1,
+                RowCount = 2,
+                BackColor = Color.White
+            };
+            browser.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
+            browser.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            browserCard.Controls.Add(browser);
+
+            var nav = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 4,
+                RowCount = 1,
+                Padding = new Padding(12, 8, 12, 6),
+                BackColor = Color.FromArgb(249, 250, 253)
+            };
+            nav.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 80));
+            nav.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100));
+            nav.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            nav.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 175));
+            browser.Controls.Add(nav, 0, 0);
+
+            upBtn = Btn("UP", Color.FromArgb(240, 244, 250), Ink);
+            upBtn.Click += async (s, e) => await UpAsync();
+            nav.Controls.Add(upBtn, 0, 0);
+
+            refreshBtn = Btn("REFRESH", Color.FromArgb(240, 244, 250), Ink);
+            refreshBtn.Click += async (s, e) => await LoadFolderAsync(currentPath);
+            nav.Controls.Add(refreshBtn, 1, 0);
+
+            pathLabel = LabelX("Internal storage", 10, Ink, true);
+            pathLabel.Dock = DockStyle.Fill;
+            pathLabel.TextAlign = ContentAlignment.MiddleLeft;
+            pathLabel.AutoEllipsis = true;
+            nav.Controls.Add(pathLabel, 2, 0);
+
+            var browseHint = LabelX("Double-click folder to open", 8.8f, Muted, false);
+            browseHint.Dock = DockStyle.Fill;
+            browseHint.TextAlign = ContentAlignment.MiddleRight;
+            nav.Controls.Add(browseHint, 3, 0);
+
+            remoteList = new ListView
+            {
+                Dock = DockStyle.Fill,
+                View = View.Details,
+                FullRowSelect = true,
+                HideSelection = false,
+                BorderStyle = BorderStyle.None,
+                BackColor = Color.White,
+                Font = new Font("Segoe UI", 9.5f)
+            };
+            remoteList.Columns.Add("Name", 520);
+            remoteList.Columns.Add("Type", 105);
+            remoteList.Columns.Add("Size", 125);
+            remoteList.Columns.Add("Modified", 180);
+            remoteList.DoubleClick += async (s, e) => await OpenSelectedAsync();
+            browser.Controls.Add(remoteList, 0, 1);
+
+            var destCard = Card();
+            destCard.Margin = new Padding(0, 0, 0, 10);
             outer.Controls.Add(destCard, 0, 3);
 
             var d = new TableLayoutPanel
@@ -19,7 +78,7 @@
             destCard.Controls.Add(d);
 
             d.Controls.Add(LabelX("DESTINATION ON THIS PC", 9, Muted, true), 0, 0);
-            var note = LabelX("4 persistent workers / 2 MB buffer recommended for OnePlus", 8.8f, Muted, false);
+            var note = LabelX("6 packed workers / 1 MB buffer recommended for many-file folders", 8.8f, Muted, false);
             note.Dock = DockStyle.Fill;
             note.TextAlign = ContentAlignment.MiddleRight;
             d.SetColumnSpan(note, 4);
@@ -72,7 +131,7 @@
             bottom.SetColumnSpan(progress, 3);
             bottom.Controls.Add(progress, 0, 0);
 
-            statusLabel = LabelX("Ready. Turbo 3.1 uses persistent XFD1 streams on the proven FTP port.", 9.5f, Muted, false);
+            statusLabel = LabelX("Ready. Turbo 4 packs many files into continuous XFD2 batches.", 9.5f, Muted, false);
             statusLabel.Dock = DockStyle.Fill;
             statusLabel.TextAlign = ContentAlignment.MiddleLeft;
             statusLabel.AutoEllipsis = true;
@@ -89,7 +148,7 @@
             totalLabel.AutoEllipsis = true;
             bottom.Controls.Add(totalLabel, 2, 1);
 
-            speedTimer = new System.Windows.Forms.Timer { Interval = 1000 };
+            speedTimer = new System.Windows.Forms.Timer { Interval = 1200 };
             speedTimer.Tick += (s, e) => UpdateSpeed();
         }
 
@@ -220,41 +279,4 @@
                     remoteList.Items.Add(li);
                 }
 
-                connectionLabel.Text = "FTP connected";
-                connectionLabel.ForeColor = Green;
-                SetStatus("Connected through the stable FTP engine. Double-click a folder or start copying the current folder tree.", false);
-            }
-            finally
-            {
-                ToggleConnect(true);
-            }
-        }
-
-        async Task OpenSelectedAsync()
-        {
-            if (remoteList.SelectedItems.Count == 0) return;
-            var x = remoteList.SelectedItems[0].Tag as FtpItem;
-            if (x != null && x.IsDirectory) await LoadFolderAsync(x.FullPath);
-        }
-
-        async Task UpAsync()
-        {
-            string p = NormalizeRemote(currentPath);
-            if (p == "/") { await LoadFolderAsync("/"); return; }
-
-            p = p.TrimEnd('/');
-            int i = p.LastIndexOf('/');
-            p = i <= 0 ? "/" : p.Substring(0, i);
-            await LoadFolderAsync(p);
-        }
-
-        async Task StartTransferAsync()
-        {
-            if (transferCts != null) return;
-
-            if (endpoint == null)
-            {
-                endpoint = await ResolveEndpointAsync(addressBox.Text);
-                if (endpoint == null)
-                {
-  
+                connectionLabel.Text = "FTP connected
