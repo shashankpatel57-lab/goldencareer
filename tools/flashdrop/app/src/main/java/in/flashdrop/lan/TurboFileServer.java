@@ -136,28 +136,43 @@ public class TurboFileServer {
     }
 
     private void sendFile(SocketChannel channel, File file, long offset, long length) throws IOException {
+        // Explicit sequential buffered I/O is more stable than sendfile/transferTo
+        // on several Android hotspot/kernel combinations.
+        final int bufferSize = 2 * 1024 * 1024;
+        ByteBuffer buf = ByteBuffer.allocateDirect(bufferSize);
+
         try (RandomAccessFile raf = new RandomAccessFile(file, "r");
              FileChannel fc = raf.getChannel()) {
-            long pos = offset;
+            fc.position(offset);
             long left = length;
+
             while (left > 0 && running) {
-                long amount = Math.min(left, 32L * 1024L * 1024L);
-                long n = fc.transferTo(pos, amount, channel);
-                if (n <= 0) {
-                    // Fallback for kernels/devices where sendfile temporarily returns 0.
-                    ByteBuffer buf = ByteBuffer.allocateDirect((int)Math.min(2L * 1024L * 1024L, left));
-                    fc.position(pos);
-                    int r = fc.read(buf);
-                    if (r <= 0) break;
-                    buf.flip();
-                    int wrote = 0;
-                    while (buf.hasRemaining()) wrote += channel.write(buf);
-                    n = wrote;
+                buf.clear();
+                if (left < bufferSize) buf.limit((int)left);
+
+                int read = fc.read(buf);
+                if (read < 0) break;
+                if (read == 0) {
+                    Thread.yield();
+                    continue;
                 }
-                pos += n;
-                left -= n;
-                bytesServed.addAndGet(n);
+
+                buf.flip();
+                int wrote = 0;
+                while (buf.hasRemaining() && running) {
+                    int n = channel.write(buf);
+                    if (n < 0) throw new EOFException("Socket closed");
+                    if (n == 0) {
+                        Thread.yield();
+                        continue;
+                    }
+                    wrote += n;
+                }
+
+                left -= wrote;
+                bytesServed.addAndGet(wrote);
             }
+
             if (left != 0) throw new EOFException("Short send");
         }
     }
