@@ -59,7 +59,7 @@
         }
         static string RemoteLeaf(string p)
         {
-            var x=(p??"").TrimEnd('/').Replace('\','/'); int i=x.LastIndexOf('/'); return i>=0?x.Substring(i+1):x;
+            var x=(p??"").TrimEnd('/').Replace('\\','/'); int i=x.LastIndexOf('/'); return i>=0?x.Substring(i+1):x;
         }
         static string Sanitize(string name)
         {
