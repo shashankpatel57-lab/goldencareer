@@ -1,5 +1,5 @@
 ng=new Padding(2,12,2,0) };
-            progress = new ProgressBar { Location=new Point(2,12), Height=18, Anchor=AnchorStyles.Left|AnchorStyles.Right|AnchorStyles.Top, Width=1000, Style=ProgressBarStyle.Continuous };
+            progress = new ProgressBar { Location=new Point(2,12), Height=18, Anchor=AnchorStyles.Left|AnchorStyles.Right|AnchorStyles.Top, Width=1000, Style=ProgressBarStyle.Continuous, Maximum=1000 };
             bottom.Controls.Add(progress);
             statusLabel=L("Ready. 100 GB/hour needs about 28 MB/s sustained throughput.",9.5f,Muted,false); statusLabel.Location=new Point(2,38); statusLabel.AutoSize=true; bottom.Controls.Add(statusLabel);
             speedLabel=L("0 MB/s",11,Blue,true); speedLabel.Anchor=AnchorStyles.Top|AnchorStyles.Right; speedLabel.AutoSize=true; speedLabel.Location=new Point(860,36); bottom.Controls.Add(speedLabel);
