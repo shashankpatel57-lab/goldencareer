@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * FlashDrop Unified HTTP Server v2.3
+ * BharatDrop Local HTTP Helper
  * One proven hotspot port for UI, browsing, benchmarks and continuous bundle streaming.
  */
 public class HttpFileServer {
@@ -53,7 +53,7 @@ public class HttpFileServer {
                 4,24,60L,TimeUnit.SECONDS,
                 new LinkedBlockingQueue<Runnable>(128),
                 r -> {
-                    Thread t=new Thread(r,"FlashDropHTTP");
+                    Thread t=new Thread(r,"BharatDropHTTP");
                     t.setDaemon(true);
                     t.setPriority(Thread.NORM_PRIORITY+1);
                     return t;
@@ -71,7 +71,7 @@ public class HttpFileServer {
                     if(!running) break;
                 }
             }
-        },"FlashDropHTTPAccept");
+        },"BharatDropHTTPAccept");
         acceptThread.setDaemon(true);
         acceptThread.start();
     }
@@ -157,7 +157,7 @@ public class HttpFileServer {
                 return;
             }
 
-            if("/client.exe".equals(path) || "/windows".equals(path) || "/FlashDropTurbo.exe".equals(path) || "/turbo.exe".equals(path)) {
+            if("/client.exe".equals(path) || "/windows".equals(path) || "/FlashDropTurbo.exe".equals(path) || "/BharatDropDesktop.exe".equals(path) || "/turbo.exe".equals(path)) {
                 serveAsset(out,"FlashDropTurbo.exe","application/vnd.microsoft.portable-executable");
                 return;
             }
@@ -225,16 +225,16 @@ public class HttpFileServer {
 
     private void serveHome(OutputStream out) throws IOException {
         String html="<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"+
-                "<title>FlashDrop Direct</title><style>"+
+                "<title>BharatDrop</title><style>"+
                 "body{font-family:Segoe UI,Arial;background:#f4f7fb;color:#10213f;margin:0}"+
                 ".hero{background:linear-gradient(135deg,#3157d5,#17a77b);color:#fff;padding:34px}"+
                 ".wrap{max-width:900px;margin:30px auto;padding:0 18px}.card{background:#fff;border-radius:18px;padding:24px;box-shadow:0 6px 28px #0001}"+
                 "a.btn{display:inline-block;background:#3157d5;color:#fff;text-decoration:none;padding:14px 20px;border-radius:12px;font-weight:700}"+
                 ".muted{color:#68758b}</style></head><body>"+
-                "<div class='hero'><h1>FlashDrop Direct v2.3</h1><div>High-speed local transfer • by Shashank Patel</div></div>"+
+                "<div class='hero'><h1>BharatDrop</h1><div>High-speed local transfer • by Shashank Patel</div></div>"+
                 "<div class='wrap'><div class='card'><h2>Windows Turbo Client</h2>"+
                 "<p>Connect this PC to the phone hotspot, download the Windows client, enter the 6-digit PIN shown in the Android app, then choose what to copy.</p>"+
-                "<p><a class='btn' href='/windows'>Download FlashDrop Turbo for Windows</a></p>"+
+                "<p><a class='btn' href='/windows'>Download BharatDrop Desktop for Windows</a></p>"+
                 "<p class='muted'>No internet required. Transfers remain inside your local hotspot.</p></div></div></body></html>";
         byte[] b=html.getBytes(StandardCharsets.UTF_8);
         writeHeaders(out,200,"text/html; charset=utf-8",b.length,"close",null);
@@ -246,7 +246,7 @@ public class HttpFileServer {
             textError(out,404,"Windows client not embedded");
             return;
         }
-        writeHeaders(out,200,type,turboExe.length,"close","Content-Disposition: attachment; filename=\"FlashDropTurbo.exe\"\r\n");
+        writeHeaders(out,200,type,turboExe.length,"close","Content-Disposition: attachment; filename=\"BharatDropDesktop.exe\"\r\n");
         out.write(turboExe);
         out.flush();
     }
