@@ -31,7 +31,7 @@ public class FileServerService extends Service {
 
     @Override public void onCreate() {
         super.onCreate();
-        startForeground(1001, buildNotification("Starting direct transfer server…"));
+        startForeground(1001, buildNotification("Starting secure local transfer server…"));
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
@@ -56,7 +56,7 @@ public class FileServerService extends Service {
             httpServer = new HttpFileServer(root, pin, turbo);
             httpServer.start();
 
-            ftpServer = new FtpFileServer(root);
+            ftpServer = new FtpFileServer(root, pin);
             ftpServer.start();
 
             String ip = httpServer.getBestIpAddress();
@@ -65,7 +65,7 @@ public class FileServerService extends Service {
             running = true;
 
             NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-            nm.notify(1001, buildNotification("Turbo 4 packed-folder engine active • " + ftpUrl));
+            nm.notify(1001, buildNotification("BharatDrop packed transfer active • " + ftpUrl));
         } catch (Exception e) {
             running = false;
             httpUrl = null;
@@ -108,13 +108,13 @@ public class FileServerService extends Service {
     private void acquireLocks() {
         try {
             PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
-            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "FlashDrop:TransferWake");
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BharatDrop:TransferWake");
             wakeLock.setReferenceCounted(false);
             wakeLock.acquire();
         } catch (Exception ignored) {}
         try {
             WifiManager wm = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-            wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "FlashDrop:HighPerfWifi");
+            wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "BharatDrop:HighPerfWifi");
             wifiLock.setReferenceCounted(false);
             wifiLock.acquire();
         } catch (Exception ignored) {}
@@ -129,14 +129,14 @@ public class FileServerService extends Service {
 
     private Notification buildNotification(String content) {
         NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-        String channelId = "flashdrop_transfer";
+        String channelId = "bharatdrop_transfer";
         if (Build.VERSION.SDK_INT >= 26) {
-            NotificationChannel ch = new NotificationChannel(channelId, "FlashDrop transfers", NotificationManager.IMPORTANCE_LOW);
-            ch.setDescription("Keeps local phone-to-PC transfers active");
+            NotificationChannel ch = new NotificationChannel(channelId, "BharatDrop transfers", NotificationManager.IMPORTANCE_LOW);
+            ch.setDescription("Keeps secure local phone-to-PC transfers active");
             nm.createNotificationChannel(ch);
         }
         Notification.Builder b = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(this, channelId) : new Notification.Builder(this);
-        return b.setContentTitle("FlashDrop Direct")
+        return b.setContentTitle("BharatDrop")
                 .setContentText(content)
                 .setSmallIcon(android.R.drawable.stat_sys_upload_done)
                 .setOngoing(true)
