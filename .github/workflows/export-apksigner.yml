@@ -1,0 +1,35 @@
+name: Export Android APK Signer
+
+on:
+  push:
+    branches:
+      - chatgpt-flashdrop-build
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Locate APK signer
+        shell: bash
+        run: |
+          set -e
+          TOOL="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
+          test -n "$TOOL"
+          DIR="$(dirname "$TOOL")"
+          mkdir -p /tmp/apksigner-tool/lib
+          cp "$TOOL" /tmp/apksigner-tool/apksigner
+          cp "$DIR/lib/apksigner.jar" /tmp/apksigner-tool/lib/apksigner.jar
+          chmod +x /tmp/apksigner-tool/apksigner
+          "$TOOL" version
+
+      - name: Upload APK signer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Android-APK-Signer
+          path: /tmp/apksigner-tool/
+          if-no-files-found: error
+          retention-days: 1
