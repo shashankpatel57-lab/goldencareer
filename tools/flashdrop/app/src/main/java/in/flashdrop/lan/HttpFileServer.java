@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * FlashDrop Unified HTTP Server v2.0
+ * FlashDrop Unified HTTP Server v2.1
  * One proven hotspot port for UI, browsing, benchmarks and continuous bundle streaming.
  */
 public class HttpFileServer {
@@ -148,8 +148,14 @@ public class HttpFileServer {
                 return;
             }
 
-            if("/client.exe".equals(path)) {
+            if("/client.exe".equals(path) || "/windows".equals(path) || "/FlashDropTurbo.exe".equals(path)) {
                 serveAsset(out,"FlashDropTurbo.exe","application/vnd.microsoft.portable-executable");
+                return;
+            }
+
+            if("/api/capabilities".equals(path)) {
+                if(!authorized(params)) { jsonError(out,403,"Bad PIN"); return; }
+                serveCapabilities(out);
                 return;
             }
 
@@ -184,6 +190,16 @@ public class HttpFileServer {
                 return;
             }
 
+            if("/api/bulk".equals(path) && "POST".equals(method)) {
+                if(!authorized(params)) { textError(out,403,"Bad PIN"); return; }
+                int len=0;
+                try{len=Integer.parseInt(headers.get("content-length"));}catch(Exception ignored){}
+                if(len<=0 || len>32*1024*1024) { textError(out,400,"Bad bulk request"); return; }
+                byte[] body=readExact(in,len);
+                serveLegacyBulk(out,body);
+                return;
+            }
+
             textError(out,404,"Not found");
         } catch(Exception ignored) {}
     }
@@ -200,10 +216,10 @@ public class HttpFileServer {
                 ".wrap{max-width:900px;margin:30px auto;padding:0 18px}.card{background:#fff;border-radius:18px;padding:24px;box-shadow:0 6px 28px #0001}"+
                 "a.btn{display:inline-block;background:#3157d5;color:#fff;text-decoration:none;padding:14px 20px;border-radius:12px;font-weight:700}"+
                 ".muted{color:#68758b}</style></head><body>"+
-                "<div class='hero'><h1>FlashDrop Direct</h1><div>High-speed local transfer • by Shashank Patel</div></div>"+
+                "<div class='hero'><h1>FlashDrop Direct v2.1</h1><div>High-speed local transfer • by Shashank Patel</div></div>"+
                 "<div class='wrap'><div class='card'><h2>Windows Turbo Client</h2>"+
                 "<p>Connect this PC to the phone hotspot, download the Windows client, enter the 6-digit PIN shown in the Android app, then choose what to copy.</p>"+
-                "<p><a class='btn' href='/client.exe'>Download FlashDrop Turbo for Windows</a></p>"+
+                "<p><a class='btn' href='/windows'>Download FlashDrop Turbo for Windows</a></p>"+
                 "<p class='muted'>No internet required. Transfers remain inside your local hotspot.</p></div></div></body></html>";
         byte[] b=html.getBytes(StandardCharsets.UTF_8);
         writeHeaders(out,200,"text/html; charset=utf-8",b.length,"close",null);
@@ -217,6 +233,14 @@ public class HttpFileServer {
         }
         writeHeaders(out,200,type,turboExe.length,"close","Content-Disposition: attachment; filename=\"FlashDropTurbo.exe\"\r\n");
         out.write(turboExe);
+        out.flush();
+    }
+
+    private void serveCapabilities(OutputStream out) throws IOException {
+        String json="{\"version\":\"2.1\",\"protocols\":[\"bundle-v2\",\"bulk-v1\",\"file-range\"],\"windowsClient\":\"2.1\"}";
+        byte[] b=json.getBytes(StandardCharsets.UTF_8);
+        writeHeaders(out,200,"application/json; charset=utf-8",b.length,"close","Cache-Control: no-store\r\n");
+        out.write(b);
         out.flush();
     }
 
@@ -377,6 +401,81 @@ public class HttpFileServer {
                         bytesServed.addAndGet(n);
                     }
                 }
+            }
+
+            writeAscii(out,"DONE\n");
+            out.flush();
+        } finally {
+            activeTransfers.decrementAndGet();
+        }
+    }
+
+    private void serveLegacyBulk(OutputStream out,byte[] body) throws IOException {
+        String text=new String(body,StandardCharsets.UTF_8);
+        String[] lines=text.split("\\r?\\n");
+        List<BundleEntry> entries=new ArrayList<>();
+
+        for(String line:lines) {
+            line=line.trim();
+            if(line.length()==0) continue;
+
+            String[] p=line.split("\\|",3);
+            if(p.length!=3) continue;
+
+            try {
+                BundleEntry e=new BundleEntry();
+                e.index=Integer.parseInt(p[0]);
+                e.offset=Math.max(0,Long.parseLong(p[1]));
+                e.path=new String(Base64.decode(p[2],Base64.DEFAULT),StandardCharsets.UTF_8);
+                entries.add(e);
+            } catch(Exception ignored) {}
+        }
+
+        String h="HTTP/1.1 200 OK\r\n"+
+                "Content-Type: application/octet-stream\r\n"+
+                "Connection: close\r\n"+
+                "Cache-Control: no-store\r\n"+
+                "X-FlashDrop-Bulk: 1\r\n\r\n";
+        out.write(h.getBytes(StandardCharsets.US_ASCII));
+        out.flush();
+
+        activeTransfers.incrementAndGet();
+        byte[] buf=new byte[2*1024*1024];
+
+        try {
+            for(BundleEntry e:entries) {
+                if(!running) break;
+
+                File f=resolve(e.path);
+                if(f==null || !f.isFile() || !f.canRead()) {
+                    writeAscii(out,"ERR "+e.index+" FILE_UNAVAILABLE\n");
+                    out.flush();
+                    continue;
+                }
+
+                long size=f.length();
+                long offset=Math.max(0,Math.min(e.offset,size));
+                long remaining=size-offset;
+
+                writeAscii(out,"FILE "+e.index+" "+remaining+" "+size+"\n");
+                out.flush();
+
+                if(remaining<=0) continue;
+
+                try(RandomAccessFile raf=new RandomAccessFile(f,"r")) {
+                    raf.seek(offset);
+                    long left=remaining;
+
+                    while(left>0 && running) {
+                        int n=raf.read(buf,0,(int)Math.min(buf.length,left));
+                        if(n<0) throw new EOFException("Unexpected EOF");
+                        out.write(buf,0,n);
+                        left-=n;
+                        bytesServed.addAndGet(n);
+                    }
+                }
+
+                out.flush();
             }
 
             writeAscii(out,"DONE\n");
