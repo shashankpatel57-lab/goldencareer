@@ -1,14 +1,4 @@
-own Num(decimal min, decimal max, decimal value)
-        {
-            return new NumericUpDown { Minimum=min, Maximum=max, Value=value, Dock=DockStyle.Fill, Margin=new Padding(0,4,8,3), Font=new Font("Segoe UI",10f), BackColor=Color.White, ForeColor=Ink };
-        }
-
-        string BaseUrl
-        {
-            get
-            {
-                var s=(addressBox.Text??"").Trim().TrimEnd('/');
-                if (!s.StartsWith("http://",StringComparison.OrdinalIgnoreCase) && !s.StartsWith("https://",StringComparison.OrdinalIgnoreCase)) s="http://"+s;
+"+s;
                 return s;
             }
         }
@@ -192,4 +182,28 @@ own Num(decimal min, decimal max, decimal value)
                 var files=new List<RemoteFile>();
                 await BuildManifestAsync(remoteRoot,"",destination,files,token);
                 totalBytes=files.Sum(f=>f.Size);
-                totalLabel.Text=files.Count+" files • "+For
+                totalLabel.Text=files.Count+" files • "+FormatBytes(totalBytes);
+
+                if(files.Count==0)
+                {
+                    SetStatus("No readable files found in this folder.",true);
+                    return;
+                }
+
+                long alreadyDone=0;
+                var pending=new List<RemoteFile>();
+
+                foreach(var f in files)
+                {
+                    token.ThrowIfCancellationRequested();
+                    Directory.CreateDirectory(Path.GetDirectoryName(f.FinalPath));
+
+                    if(File.Exists(f.FinalPath) && new FileInfo(f.FinalPath).Length==f.Size)
+                    {
+                        alreadyDone+=f.Size;
+                        continue;
+                    }
+
+                    if(f.Size==0)
+                    {
+                        File.WriteAllBytes(f.FinalPath,new byt

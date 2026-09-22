@@ -1,28 +1,4 @@
-matBytes(totalBytes);
-
-                if(files.Count==0)
-                {
-                    SetStatus("No readable files found in this folder.",true);
-                    return;
-                }
-
-                long alreadyDone=0;
-                var pending=new List<RemoteFile>();
-
-                foreach(var f in files)
-                {
-                    token.ThrowIfCancellationRequested();
-                    Directory.CreateDirectory(Path.GetDirectoryName(f.FinalPath));
-
-                    if(File.Exists(f.FinalPath) && new FileInfo(f.FinalPath).Length==f.Size)
-                    {
-                        alreadyDone+=f.Size;
-                        continue;
-                    }
-
-                    if(f.Size==0)
-                    {
-                        File.WriteAllBytes(f.FinalPath,new byte[0]);
+e[0]);
                         continue;
                     }
 
@@ -82,7 +58,7 @@ matBytes(totalBytes);
                 speedTimer.Start();
 
                 SetStatus(
-                    "Universal Turbo v2.2 running — "+laneCount+
+                    "Universal Turbo v2.3 running — "+laneCount+
                     " adaptive HTTP lanes on "+new Uri(BaseUrl).Port+
                     " • automatic protocol fallback.",
                     false);
@@ -265,4 +241,42 @@ matBytes(totalBytes);
             req.Proxy=null;
             req.KeepAlive=true;
             req.Timeout=15000;
-            req.R
+            req.ReadWriteTimeout=15000;
+
+            var sw=Stopwatch.StartNew();
+            long got=0;
+
+            using(token.Register(()=>{try{req.Abort();}catch{}}))
+            using(var res=(HttpWebResponse)await req.GetResponseAsync())
+            using(var input=res.GetResponseStream())
+            {
+                byte[] buf=new byte[1024*1024];
+
+                while(got<bytes)
+                {
+                    int n=await ReadWithTimeoutAsync(
+                        input,buf,0,(int)Math.Min(buf.Length,bytes-got),token,15000);
+
+                    if(n<=0)break;
+                    got+=n;
+                }
+            }
+
+            sw.Stop();
+
+            if(got!=bytes)
+                throw new IOException("LAN benchmark incomplete "+got+"/"+bytes);
+
+            return got/1048576d/Math.Max(.001,sw.Elapsed.TotalSeconds);
+        }
+
+        async Task DownloadBundleLaneAsync(
+            List<RemoteFile> lane,
+            CancellationToken token,
+            ConcurrentQueue<string> errors)
+        {
+            int cursor=0;
+
+            while(cursor<lane.Count)
+            {
+  

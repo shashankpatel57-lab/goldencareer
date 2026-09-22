@@ -170,7 +170,7 @@ namespace FlashDropTurbo
 
         public MainForm()
         {
-            Text = "FlashDrop Turbo v2.2 - by Shashank Patel";
+            Text = "FlashDrop Turbo v2.3 - by Shashank Patel";
             StartPosition = FormStartPosition.CenterScreen;
             MinimumSize = new Size(1000, 720);
             Size = new Size(1180, 820);
@@ -256,4 +256,9 @@ namespace FlashDropTurbo
             pinBox.BackColor = Color.FromArgb(255,252,232);
             grid.Controls.Add(pinBox,1,1);
 
-            detectBtn = Btn
+            detectBtn = Btn("AUTO DETECT", Color.FromArgb(232,237,255), Blue);
+            detectBtn.Click += async (s,e) => await AutoDetectAsync();
+            grid.Controls.Add(detectBtn,2,1);
+
+            connectBtn = Btn("CONNECT", Blue, Color.White);
+            connectBtn.Click += async (s,e) 

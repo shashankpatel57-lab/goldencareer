@@ -1,49 +1,4 @@
-ptions.Asynchronous))
-            {
-                fs.Seek(offset,SeekOrigin.Begin);
-                if(fs.Length!=offset)fs.SetLength(offset);
-
-                long got=0;
-
-                while(got<remaining)
-                {
-                    token.ThrowIfCancellationRequested();
-
-                    int n=await ReadWithTimeoutAsync(
-                        input,buf,0,(int)Math.Min(buf.Length,remaining-got),token,20000);
-
-                    if(n<=0)
-                        throw new IOException("File stream ended early");
-
-                    await fs.WriteAsync(buf,0,n,token);
-                    got+=n;
-                    Interlocked.Add(ref completedBytes,n);
-                }
-            }
-
-            FinalizePartFile(file);
-        }
-
-        async Task DownloadFilesHttpFallbackAsync(
-            List<RemoteFile> files,
-            CancellationToken token,
-            ConcurrentQueue<string> errors)
-        {
-            foreach(var file in files)
-            {
-                token.ThrowIfCancellationRequested();
-
-                if(File.Exists(file.FinalPath) && new FileInfo(file.FinalPath).Length==file.Size)
-                    continue;
-
-                bool ok=false;
-                Exception last=null;
-
-                for(int attempt=1;attempt<=4 && !ok;attempt++)
-                {
-                    try
-                    {
-                        await DownloadSingleHttpFileAsync(file,token);
+                      await DownloadSingleHttpFileAsync(file,token);
                         ok=true;
                     }
                     catch(Exception ex)
@@ -62,8 +17,56 @@ ptions.Asynchronous))
             RemoteFile file,
             CancellationToken token)
         {
+            Exception first=null;
+
+            try
+            {
+                await DownloadSingleHttpFileFromRouteAsync(
+                    file,
+                    "/api/file",
+                    token);
+                return;
+            }
+            catch(WebException ex)
+            {
+                first=ex;
+                var response=ex.Response as HttpWebResponse;
+
+                if(response!=null && response.StatusCode!=HttpStatusCode.NotFound)
+                    throw;
+            }
+            catch(Exception ex)
+            {
+                first=ex;
+            }
+
+            // FlashDrop v1.x Android server generations use /download.
+            try
+            {
+                SetStatus("Legacy FlashDrop server detected — using /download compatibility mode.",false);
+                await DownloadSingleHttpFileFromRouteAsync(
+                    file,
+                    "/download",
+                    token);
+            }
+            catch(Exception legacy)
+            {
+                throw new IOException(
+                    "Both new and legacy file routes failed. New route: "+
+                    (first==null?"unknown":first.Message)+
+                    " | Legacy route: "+legacy.Message,
+                    legacy);
+            }
+        }
+
+        async Task DownloadSingleHttpFileFromRouteAsync(
+            RemoteFile file,
+            string route,
+            CancellationToken token)
+        {
             long offset=SafePartialLength(file);
-            string url=BaseUrl+"/api/file?pin="+Uri.EscapeDataString(Pin)+
+            string url=BaseUrl+route+
+                "?pin="+Uri.EscapeDataString(Pin)+
                 "&path="+Uri.EscapeDataString(file.RemotePath??"");
 
             var req=(HttpWebRequest)WebRequest.Create(url);
@@ -104,7 +107,12 @@ ptions.Asynchronous))
                         token.ThrowIfCancellationRequested();
 
                         int n=await ReadWithTimeoutAsync(
-                            input,buf,0,(int)Math.Min(buf.Length,file.Size-got),token,20000);
+                            input,
+                            buf,
+                            0,
+                            (int)Math.Min(buf.Length,file.Size-got),
+                            token,
+                            20000);
 
                         if(n<=0)break;
 
@@ -114,7 +122,8 @@ ptions.Asynchronous))
                     }
 
                     if(got!=file.Size)
-                        throw new IOException("HTTP file incomplete "+got+"/"+file.Size);
+                        throw new IOException(
+                            route+" incomplete "+got+"/"+file.Size);
                 }
             }
 

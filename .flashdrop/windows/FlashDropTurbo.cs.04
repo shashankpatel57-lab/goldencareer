@@ -1,42 +1,4 @@
-eadWriteTimeout=15000;
-
-            var sw=Stopwatch.StartNew();
-            long got=0;
-
-            using(token.Register(()=>{try{req.Abort();}catch{}}))
-            using(var res=(HttpWebResponse)await req.GetResponseAsync())
-            using(var input=res.GetResponseStream())
-            {
-                byte[] buf=new byte[1024*1024];
-
-                while(got<bytes)
-                {
-                    int n=await ReadWithTimeoutAsync(
-                        input,buf,0,(int)Math.Min(buf.Length,bytes-got),token,15000);
-
-                    if(n<=0)break;
-                    got+=n;
-                }
-            }
-
-            sw.Stop();
-
-            if(got!=bytes)
-                throw new IOException("LAN benchmark incomplete "+got+"/"+bytes);
-
-            return got/1048576d/Math.Max(.001,sw.Elapsed.TotalSeconds);
-        }
-
-        async Task DownloadBundleLaneAsync(
-            List<RemoteFile> lane,
-            CancellationToken token,
-            ConcurrentQueue<string> errors)
-        {
-            int cursor=0;
-
-            while(cursor<lane.Count)
-            {
-                token.ThrowIfCancellationRequested();
+              token.ThrowIfCancellationRequested();
 
                 var batch=new List<RemoteFile>();
                 int bodyEstimate=0;
@@ -276,4 +238,49 @@ eadWriteTimeout=15000;
                 FileAccess.Write,
                 FileShare.Read,
                 bufferBytes,
-                FileOptions.SequentialScan | FileO
+                FileOptions.SequentialScan | FileOptions.Asynchronous))
+            {
+                fs.Seek(offset,SeekOrigin.Begin);
+                if(fs.Length!=offset)fs.SetLength(offset);
+
+                long got=0;
+
+                while(got<remaining)
+                {
+                    token.ThrowIfCancellationRequested();
+
+                    int n=await ReadWithTimeoutAsync(
+                        input,buf,0,(int)Math.Min(buf.Length,remaining-got),token,20000);
+
+                    if(n<=0)
+                        throw new IOException("File stream ended early");
+
+                    await fs.WriteAsync(buf,0,n,token);
+                    got+=n;
+                    Interlocked.Add(ref completedBytes,n);
+                }
+            }
+
+            FinalizePartFile(file);
+        }
+
+        async Task DownloadFilesHttpFallbackAsync(
+            List<RemoteFile> files,
+            CancellationToken token,
+            ConcurrentQueue<string> errors)
+        {
+            foreach(var file in files)
+            {
+                token.ThrowIfCancellationRequested();
+
+                if(File.Exists(file.FinalPath) && new FileInfo(file.FinalPath).Length==file.Size)
+                    continue;
+
+                bool ok=false;
+                Exception last=null;
+
+                for(int attempt=1;attempt<=4 && !ok;attempt++)
+                {
+                    try
+                    {
+  

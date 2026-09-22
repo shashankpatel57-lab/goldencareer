@@ -1,9 +1,4 @@
-("AUTO DETECT", Color.FromArgb(232,237,255), Blue);
-            detectBtn.Click += async (s,e) => await AutoDetectAsync();
-            grid.Controls.Add(detectBtn,2,1);
-
-            connectBtn = Btn("CONNECT", Blue, Color.White);
-            connectBtn.Click += async (s,e) => await LoadFolderAsync(currentPath);
+=> await LoadFolderAsync(currentPath);
             grid.Controls.Add(connectBtn,3,1);
 
             workersBox = Num(1,6,3);
@@ -108,7 +103,7 @@
             destCard.Controls.Add(d);
 
             d.Controls.Add(L("DESTINATION ON THIS PC",9,Muted,true),0,0);
-            var turboNote=L("Universal Turbo • benchmark-free fallback • old/new server compatible",8.8f,Muted,false);
+            var turboNote=L("Universal Turbo • new + legacy Android server compatible",8.8f,Muted,false);
             turboNote.Dock=DockStyle.Fill;
             turboNote.TextAlign=ContentAlignment.MiddleRight;
             d.SetColumnSpan(turboNote,4);
@@ -159,7 +154,7 @@
             bottom.SetColumnSpan(progress,3);
             bottom.Controls.Add(progress,0,0);
 
-            statusLabel=L("Ready. Universal Turbo v2.2 • 404-safe • OnePlus optimized.",9.5f,Muted,false);
+            statusLabel=L("Ready. Universal Turbo v2.3 • /api/file + legacy /download fallback.",9.5f,Muted,false);
             statusLabel.Dock=DockStyle.Fill;
             statusLabel.TextAlign=ContentAlignment.MiddleLeft;
             statusLabel.AutoEllipsis=true;
@@ -204,4 +199,14 @@
             return b;
         }
 
-        NumericUpD
+        NumericUpDown Num(decimal min, decimal max, decimal value)
+        {
+            return new NumericUpDown { Minimum=min, Maximum=max, Value=value, Dock=DockStyle.Fill, Margin=new Padding(0,4,8,3), Font=new Font("Segoe UI",10f), BackColor=Color.White, ForeColor=Ink };
+        }
+
+        string BaseUrl
+        {
+            get
+            {
+                var s=(addressBox.Text??"").Trim().TrimEnd('/');
+                if (!s.StartsWith("http://",StringComparison.OrdinalIgnoreCase) && !s.StartsWith("https://",StringComparison.OrdinalIgnoreCase)) s="http://
