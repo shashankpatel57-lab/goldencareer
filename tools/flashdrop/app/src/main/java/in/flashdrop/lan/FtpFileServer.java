@@ -125,6 +125,7 @@ public class FtpFileServer {
                         writeRaw(out, " MDTM\r\n");
                         writeRaw(out, " REST STREAM\r\n");
                         writeRaw(out, " XFD1\r\n");
+                        writeRaw(out, " XFD2 PACKED-FOLDER\r\n");
                         writeRaw(out, " MLST type*;size*;modify*;\r\n");
                         writeRaw(out, "211 End\r\n");
                         break;
@@ -246,6 +247,9 @@ public class FtpFileServer {
                         else reply(out, 426, "Connection closed; transfer aborted");
                         break;
                     }
+                    case "XFD2":
+                        handlePackedFolder(s, in, out, arg);
+                        return;
                     case "XFD1":
                         reply(out, 200, "XFD1 READY");
                         handleTurboStream(s, in, out);
@@ -265,6 +269,212 @@ public class FtpFileServer {
         } catch (Exception ignored) {
         } finally {
             closeQuietly(passive);
+        }
+    }
+
+    private static final class PackEntry {
+        int index;
+        boolean directory;
+        File file;
+        String relative;
+        long size;
+        long modified;
+    }
+
+    private static final class PackWant {
+        int index;
+        long offset;
+    }
+
+    private void handlePackedFolder(
+            Socket socket,
+            BufferedReader in,
+            BufferedWriter controlOut,
+            String encodedRoot) throws IOException {
+
+        String remote;
+        try {
+            remote = new String(
+                    android.util.Base64.decode(encodedRoot, android.util.Base64.DEFAULT),
+                    StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            reply(controlOut, 501, "Bad packed-folder path");
+            return;
+        }
+
+        File selected = resolve(root, remote);
+        if (selected == null || !selected.exists() || !selected.canRead()) {
+            reply(controlOut, 550, "Packed-folder path unavailable");
+            return;
+        }
+
+        List<PackEntry> manifest = new ArrayList<>();
+        long[] total = new long[]{0L};
+        buildPackManifest(selected, selected, manifest, total);
+
+        reply(controlOut, 200, "XFD2 READY");
+        writeRaw(controlOut,
+                "MANIFEST " + manifest.size() + " " + total[0] + "\r\n");
+
+        for (PackEntry e : manifest) {
+            String rel64 = android.util.Base64.encodeToString(
+                    e.relative.getBytes(StandardCharsets.UTF_8),
+                    android.util.Base64.NO_WRAP);
+
+            if (e.directory) {
+                writeRaw(controlOut,
+                        "D " + e.index + " " + e.modified + " " + rel64 + "\r\n");
+            } else {
+                writeRaw(controlOut,
+                        "F " + e.index + " " + e.size + " " + e.modified + " " + rel64 + "\r\n");
+            }
+        }
+
+        writeRaw(controlOut, "ENDMANIFEST\r\n");
+
+        String wantHeader = in.readLine();
+        if (wantHeader == null || !wantHeader.startsWith("WANT ")) {
+            throw new EOFException("XFD2 WANT missing");
+        }
+
+        int wantCount;
+        try {
+            wantCount = Integer.parseInt(wantHeader.substring(5).trim());
+        } catch (Exception e) {
+            reply(controlOut, 501, "Bad WANT count");
+            return;
+        }
+
+        List<PackWant> wants = new ArrayList<>(Math.max(0, wantCount));
+
+        for (int i = 0; i < wantCount; i++) {
+            String line = in.readLine();
+            if (line == null) throw new EOFException("XFD2 WANT truncated");
+
+            String[] p = line.trim().split(" ");
+            if (p.length != 2) throw new IOException("Bad WANT item");
+
+            PackWant w = new PackWant();
+            try {
+                w.index = Integer.parseInt(p[0]);
+                w.offset = Math.max(0L, Long.parseLong(p[1]));
+            } catch (Exception e) {
+                throw new IOException("Bad WANT item");
+            }
+            wants.add(w);
+        }
+
+        String endWant = in.readLine();
+        if (!"ENDWANT".equals(endWant))
+            throw new IOException("XFD2 ENDWANT missing");
+
+        OutputStream raw = socket.getOutputStream();
+        byte[] buf = new byte[4 * 1024 * 1024];
+
+        for (PackWant w : wants) {
+            if (!running) break;
+
+            if (w.index < 0 || w.index >= manifest.size()) {
+                writeRaw(controlOut, "ERR " + w.index + " BAD_INDEX\r\n");
+                continue;
+            }
+
+            PackEntry e = manifest.get(w.index);
+            if (e.directory || e.file == null || !e.file.isFile() || !e.file.canRead()) {
+                writeRaw(controlOut, "ERR " + w.index + " FILE_UNAVAILABLE\r\n");
+                continue;
+            }
+
+            long currentSize = e.file.length();
+            long offset = Math.min(Math.max(0L, w.offset), currentSize);
+            long remaining = currentSize - offset;
+
+            writeRaw(controlOut,
+                    "DATA " + e.index + " " + remaining + " " + currentSize + "\r\n");
+
+            activeTransfers.incrementAndGet();
+            long sent = 0L;
+
+            try (RandomAccessFile raf = new RandomAccessFile(e.file, "r")) {
+                raf.seek(offset);
+
+                while (sent < remaining && running) {
+                    int n = raf.read(
+                            buf,
+                            0,
+                            (int)Math.min((long)buf.length, remaining - sent));
+
+                    if (n < 0) break;
+                    if (n == 0) continue;
+
+                    raw.write(buf, 0, n);
+                    sent += n;
+                    bytesServed.addAndGet(n);
+                }
+
+                raw.flush();
+            } finally {
+                activeTransfers.decrementAndGet();
+            }
+
+            if (sent != remaining)
+                throw new EOFException("XFD2 short send");
+        }
+
+        writeRaw(controlOut, "DONE\r\n");
+    }
+
+    private void buildPackManifest(
+            File base,
+            File current,
+            List<PackEntry> out,
+            long[] total) {
+
+        if (!running || current == null || !current.exists() || !current.canRead())
+            return;
+
+        if (!current.equals(base)) {
+            PackEntry e = new PackEntry();
+            e.index = out.size();
+            e.directory = current.isDirectory();
+            e.file = current;
+            e.relative = packRelative(base, current);
+            e.size = current.isFile() ? current.length() : 0L;
+            e.modified = current.lastModified();
+            out.add(e);
+
+            if (!e.directory)
+                total[0] += e.size;
+        }
+
+        if (!current.isDirectory())
+            return;
+
+        File[] children = safeList(current);
+        Arrays.sort(children, (a, b) -> {
+            if (a.isDirectory() != b.isDirectory())
+                return a.isDirectory() ? -1 : 1;
+            return a.getName().compareToIgnoreCase(b.getName());
+        });
+
+        for (File child : children)
+            buildPackManifest(base, child, out, total);
+    }
+
+    private String packRelative(File base, File file) {
+        try {
+            String bp = base.getCanonicalPath();
+            String fp = file.getCanonicalPath();
+
+            if (fp.equals(bp)) return "";
+
+            String rel = fp.substring(bp.length());
+            while (rel.startsWith(File.separator))
+                rel = rel.substring(1);
+
+            return rel.replace(File.separatorChar, '/');
+        } catch (Exception e) {
+            return file.getName();
         }
     }
 
