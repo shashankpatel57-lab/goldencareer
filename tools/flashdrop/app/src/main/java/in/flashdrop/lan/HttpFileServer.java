@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * FlashDrop Unified HTTP Server v2.1
+ * FlashDrop Unified HTTP Server v2.3
  * One proven hotspot port for UI, browsing, benchmarks and continuous bundle streaming.
  */
 public class HttpFileServer {
@@ -148,7 +148,16 @@ public class HttpFileServer {
                 return;
             }
 
-            if("/client.exe".equals(path) || "/windows".equals(path) || "/FlashDropTurbo.exe".equals(path)) {
+            if("/api/auth".equals(path)) {
+                if(!authorized(params)) { textError(out,403,"Bad PIN"); return; }
+                byte[] ok="{\"ok\":true}".getBytes(StandardCharsets.UTF_8);
+                writeHeaders(out,200,"application/json; charset=utf-8",ok.length,"close","Cache-Control: no-store\r\n");
+                out.write(ok);
+                out.flush();
+                return;
+            }
+
+            if("/client.exe".equals(path) || "/windows".equals(path) || "/FlashDropTurbo.exe".equals(path) || "/turbo.exe".equals(path)) {
                 serveAsset(out,"FlashDropTurbo.exe","application/vnd.microsoft.portable-executable");
                 return;
             }
@@ -166,6 +175,12 @@ public class HttpFileServer {
             }
 
             if("/api/file".equals(path)) {
+                if(!authorized(params)) { textError(out,403,"Bad PIN"); return; }
+                serveFile(out,params.get("path"),headers.get("range"));
+                return;
+            }
+
+            if("/download".equals(path)) {
                 if(!authorized(params)) { textError(out,403,"Bad PIN"); return; }
                 serveFile(out,params.get("path"),headers.get("range"));
                 return;
@@ -216,7 +231,7 @@ public class HttpFileServer {
                 ".wrap{max-width:900px;margin:30px auto;padding:0 18px}.card{background:#fff;border-radius:18px;padding:24px;box-shadow:0 6px 28px #0001}"+
                 "a.btn{display:inline-block;background:#3157d5;color:#fff;text-decoration:none;padding:14px 20px;border-radius:12px;font-weight:700}"+
                 ".muted{color:#68758b}</style></head><body>"+
-                "<div class='hero'><h1>FlashDrop Direct v2.1</h1><div>High-speed local transfer • by Shashank Patel</div></div>"+
+                "<div class='hero'><h1>FlashDrop Direct v2.3</h1><div>High-speed local transfer • by Shashank Patel</div></div>"+
                 "<div class='wrap'><div class='card'><h2>Windows Turbo Client</h2>"+
                 "<p>Connect this PC to the phone hotspot, download the Windows client, enter the 6-digit PIN shown in the Android app, then choose what to copy.</p>"+
                 "<p><a class='btn' href='/windows'>Download FlashDrop Turbo for Windows</a></p>"+
@@ -237,7 +252,7 @@ public class HttpFileServer {
     }
 
     private void serveCapabilities(OutputStream out) throws IOException {
-        String json="{\"version\":\"2.1\",\"protocols\":[\"bundle-v2\",\"bulk-v1\",\"file-range\"],\"windowsClient\":\"2.1\"}";
+        String json="{\"version\":\"2.3\",\"protocols\":[\"bundle-v2\",\"bulk-v1\",\"file-range\",\"legacy-download\"],\"windowsClient\":\"2.3\"}";
         byte[] b=json.getBytes(StandardCharsets.UTF_8);
         writeHeaders(out,200,"application/json; charset=utf-8",b.length,"close","Cache-Control: no-store\r\n");
         out.write(b);
