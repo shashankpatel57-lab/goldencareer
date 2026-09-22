@@ -124,6 +124,7 @@ public class FtpFileServer {
                         writeRaw(out, " SIZE\r\n");
                         writeRaw(out, " MDTM\r\n");
                         writeRaw(out, " REST STREAM\r\n");
+                        writeRaw(out, " XFD1\r\n");
                         writeRaw(out, " MLST type*;size*;modify*;\r\n");
                         writeRaw(out, "211 End\r\n");
                         break;
@@ -245,6 +246,10 @@ public class FtpFileServer {
                         else reply(out, 426, "Connection closed; transfer aborted");
                         break;
                     }
+                    case "XFD1":
+                        reply(out, 200, "XFD1 READY");
+                        handleTurboStream(s, in, out);
+                        return;
                     case "STAT":
                         reply(out, 211, "FlashDrop Direct ready; read-only shared storage");
                         break;
@@ -260,6 +265,98 @@ public class FtpFileServer {
         } catch (Exception ignored) {
         } finally {
             closeQuietly(passive);
+        }
+    }
+
+    private void handleTurboStream(Socket socket, BufferedReader in, BufferedWriter controlOut) throws IOException {
+        OutputStream raw = socket.getOutputStream();
+        byte[] buf = new byte[4 * 1024 * 1024];
+
+        while (running) {
+            String line = in.readLine();
+            if (line == null) break;
+            line = line.trim();
+            if (line.isEmpty()) continue;
+
+            if ("QUIT".equalsIgnoreCase(line)) {
+                reply(controlOut, 221, "Goodbye");
+                break;
+            }
+
+            if ("PING".equalsIgnoreCase(line)) {
+                reply(controlOut, 200, "PONG");
+                continue;
+            }
+
+            if (!line.startsWith("GET ")) {
+                reply(controlOut, 500, "XFD1 expected GET");
+                continue;
+            }
+
+            String[] p = line.split(" ", 4);
+            if (p.length != 4) {
+                reply(controlOut, 501, "Bad GET request");
+                continue;
+            }
+
+            long offset;
+            long requested;
+            try {
+                offset = Math.max(0L, Long.parseLong(p[1]));
+                requested = Math.max(0L, Long.parseLong(p[2]));
+            } catch (Exception e) {
+                reply(controlOut, 501, "Bad range");
+                continue;
+            }
+
+            String remote;
+            try {
+                remote = new String(android.util.Base64.decode(p[3], android.util.Base64.DEFAULT), StandardCharsets.UTF_8);
+            } catch (Exception e) {
+                reply(controlOut, 501, "Bad path");
+                continue;
+            }
+
+            File f = resolve(root, remote);
+            if (f == null || !f.isFile() || !f.canRead()) {
+                reply(controlOut, 550, "File unavailable");
+                continue;
+            }
+
+            long total = f.length();
+            offset = Math.min(offset, total);
+            long remaining = total - offset;
+            long length = requested <= 0 ? remaining : Math.min(requested, remaining);
+
+            writeRaw(controlOut, "150 " + length + " " + total + "\r\n");
+
+            activeTransfers.incrementAndGet();
+            long sent = 0L;
+
+            try (RandomAccessFile raf = new RandomAccessFile(f, "r")) {
+                raf.seek(offset);
+
+                while (sent < length && running) {
+                    int n = raf.read(buf, 0, (int)Math.min((long)buf.length, length - sent));
+                    if (n < 0) break;
+                    if (n == 0) continue;
+
+                    raw.write(buf, 0, n);
+                    sent += n;
+                    bytesServed.addAndGet(n);
+                }
+
+                raw.flush();
+            } finally {
+                activeTransfers.decrementAndGet();
+            }
+
+            if (sent != length) {
+                try { writeRaw(controlOut, "426 " + sent + "\r\n"); } catch (Exception ignored) {}
+                throw new EOFException("Turbo stream short send");
+            }
+
+            writeRaw(controlOut, "226 " + sent + "\r\n");
         }
     }
 
