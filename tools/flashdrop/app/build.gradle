@@ -4,19 +4,39 @@ plugins {
 
 android {
     namespace 'in.flashdrop.lan'
-    compileSdk 35
+    compileSdk 36
 
     defaultConfig {
-        applicationId 'in.flashdrop.lan'
+        applicationId 'in.bharatdrop.app'
         minSdk 24
-        targetSdk 35
-        versionCode 1
-        versionName '1.0.0'
+        targetSdk 36
+        versionCode 50
+        versionName '5.0.0'
+    }
+
+    signingConfigs {
+        release {
+            def ks = System.getenv('BD_KEYSTORE')
+            if (ks != null && !ks.isEmpty()) {
+                storeFile file(ks)
+                storePassword System.getenv('BD_STORE_PASS')
+                keyAlias System.getenv('BD_KEY_ALIAS')
+                keyPassword System.getenv('BD_KEY_PASS')
+            }
+        }
     }
 
     buildTypes {
         release {
             minifyEnabled false
+            shrinkResources false
+            if (System.getenv('BD_KEYSTORE') != null) {
+                signingConfig signingConfigs.release
+            }
+        }
+        debug {
+            applicationIdSuffix '.debug'
+            versionNameSuffix '-debug'
         }
     }
 }
