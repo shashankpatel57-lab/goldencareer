@@ -13,8 +13,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * FlashDrop Turbo v1.4 raw read-only LAN server.
- * One request per TCP connection; optimized for sequential file streaming.
+ * FlashDrop Turbo v1.7 raw read-only LAN server.
+ * Persistent request sessions; optimized for continuous sequential streaming.
  */
 public class TurboFileServer {
     private static final int DEFAULT_PORT = 9091;
@@ -95,40 +95,56 @@ public class TurboFileServer {
 
     private void handle(SocketChannel ch) {
         activeTransfers.incrementAndGet();
-        try (SocketChannel channel = ch) {
-            Request req = readRequest(channel.socket().getInputStream());
-            if (req == null || !"FLASHDROP/1".equals(req.magic)) {
-                sendError(channel, "BAD_PROTOCOL");
-                return;
-            }
-            if (!pin.equals(req.pin)) {
-                sendError(channel, "BAD_PIN");
-                return;
-            }
 
-            if ("BENCH".equals(req.mode)) {
-                long size = Math.max(8L * 1024L * 1024L, Math.min(MAX_BENCH, req.benchBytes));
-                sendHeader(channel, "OK " + size + "\n");
-                sendBenchmark(channel, size);
-                return;
-            }
+        try (SocketChannel channel = ch;
+             BufferedReader reader = new BufferedReader(
+                     new InputStreamReader(channel.socket().getInputStream(), StandardCharsets.UTF_8),
+                     8192)) {
 
-            if (!"GET".equals(req.mode)) {
-                sendError(channel, "BAD_MODE");
-                return;
-            }
+            while (running && channel.isOpen()) {
+                Request req = readRequest(reader);
+                if (req == null) break;
 
-            File f = resolve(req.path);
-            if (f == null || !f.isFile() || !f.canRead()) {
-                sendError(channel, "FILE_UNAVAILABLE");
-                return;
-            }
+                if (!"FLASHDROP/1".equals(req.magic)) {
+                    sendError(channel, "BAD_PROTOCOL");
+                    break;
+                }
 
-            long size = f.length();
-            long offset = Math.max(0L, Math.min(req.offset, size));
-            long remaining = size - offset;
-            sendHeader(channel, "OK " + remaining + " " + size + "\n");
-            if (remaining > 0) sendFile(channel, f, offset, remaining);
+                if (!pin.equals(req.pin)) {
+                    sendError(channel, "BAD_PIN");
+                    break;
+                }
+
+                if ("PING".equals(req.mode)) {
+                    sendHeader(channel, "OK PONG\n");
+                    continue;
+                }
+
+                if ("BENCH".equals(req.mode)) {
+                    long size = Math.max(8L * 1024L * 1024L, Math.min(MAX_BENCH, req.benchBytes));
+                    sendHeader(channel, "OK " + size + "\n");
+                    sendBenchmark(channel, size);
+                    continue;
+                }
+
+                if (!"GET".equals(req.mode)) {
+                    sendError(channel, "BAD_MODE");
+                    continue;
+                }
+
+                File f = resolve(req.path);
+                if (f == null || !f.isFile() || !f.canRead()) {
+                    sendError(channel, "FILE_UNAVAILABLE");
+                    continue;
+                }
+
+                long size = f.length();
+                long offset = Math.max(0L, Math.min(req.offset, size));
+                long remaining = size - offset;
+
+                sendHeader(channel, "OK " + remaining + " " + size + "\n");
+                if (remaining > 0) sendFile(channel, f, offset, remaining);
+            }
         } catch (Exception ignored) {
         } finally {
             activeTransfers.decrementAndGet();
@@ -200,28 +216,39 @@ public class TurboFileServer {
         try { sendHeader(ch, "ERR " + message + "\n"); } catch (Exception ignored) {}
     }
 
-    private Request readRequest(InputStream input) throws IOException {
-        BufferedReader r = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8), 4096);
+    private Request readRequest(BufferedReader r) throws IOException {
         Request q = new Request();
         int consumed = 0;
         String line;
+
         while ((line = r.readLine()) != null) {
             consumed += line.length() + 1;
             if (consumed > MAX_HEADER) throw new IOException("Header too large");
+
             if (q.magic == null) {
-                q.magic = line.trim();
+                String first = line.trim();
+                if (first.length() == 0) continue;
+                q.magic = first;
                 continue;
             }
+
             if (line.length() == 0) break;
+
             int sp = line.indexOf(' ');
             String k = sp < 0 ? line.trim().toUpperCase(Locale.US) : line.substring(0, sp).trim().toUpperCase(Locale.US);
             String v = sp < 0 ? "" : line.substring(sp + 1).trim();
+
             switch (k) {
                 case "PIN": q.pin = v; break;
                 case "MODE": q.mode = v.toUpperCase(Locale.US); break;
                 case "PATH":
-                    try { q.path = new String(android.util.Base64.decode(v, android.util.Base64.DEFAULT), StandardCharsets.UTF_8); }
-                    catch (Exception e) { q.path = null; }
+                    try {
+                        q.path = new String(
+                                android.util.Base64.decode(v, android.util.Base64.DEFAULT),
+                                StandardCharsets.UTF_8);
+                    } catch (Exception e) {
+                        q.path = null;
+                    }
                     break;
                 case "OFFSET":
                     try { q.offset = Long.parseLong(v); } catch (Exception ignored) {}
@@ -231,6 +258,8 @@ public class TurboFileServer {
                     break;
             }
         }
+
+        if (q.magic == null) return null;
         return q;
     }
 
