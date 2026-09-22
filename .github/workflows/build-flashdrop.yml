@@ -1,0 +1,53 @@
+name: Build FlashDrop APK
+
+on:
+  push:
+    branches:
+      - chatgpt-flashdrop-build
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout build branch
+        uses: actions/checkout@v4
+
+      - name: Restore exact FlashDrop source snapshot
+        shell: bash
+        run: |
+          cat .flashdrop/src.b64.* | tr -d '\n\r ' | base64 -d > /tmp/flashdrop-src.zip
+          echo "55354f1e7987b3051b2fcdba1985fb18ab7f2062820a90299222f236b3f7e1ab  /tmp/flashdrop-src.zip" | sha256sum -c -
+          unzip -o /tmp/flashdrop-src.zip -d .
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build debug APK
+        working-directory: tools/flashdrop
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Stage APK
+        shell: bash
+        run: |
+          cp tools/flashdrop/app/build/outputs/apk/debug/app-debug.apk FlashDrop-LAN-v1.0.apk
+          sha256sum FlashDrop-LAN-v1.0.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FlashDrop-APK
+          path: FlashDrop-LAN-v1.0.apk
+          if-no-files-found: error
+          retention-days: 7
