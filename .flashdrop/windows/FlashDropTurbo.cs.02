@@ -1,0 +1,89 @@
+ng=new Padding(2,12,2,0) };
+            progress = new ProgressBar { Location=new Point(2,12), Height=18, Anchor=AnchorStyles.Left|AnchorStyles.Right|AnchorStyles.Top, Width=1000, Style=ProgressBarStyle.Continuous };
+            bottom.Controls.Add(progress);
+            statusLabel=L("Ready. 100 GB/hour needs about 28 MB/s sustained throughput.",9.5f,Muted,false); statusLabel.Location=new Point(2,38); statusLabel.AutoSize=true; bottom.Controls.Add(statusLabel);
+            speedLabel=L("0 MB/s",11,Blue,true); speedLabel.Anchor=AnchorStyles.Top|AnchorStyles.Right; speedLabel.AutoSize=true; speedLabel.Location=new Point(860,36); bottom.Controls.Add(speedLabel);
+            totalLabel=L("",9,Muted,false); totalLabel.Anchor=AnchorStyles.Top|AnchorStyles.Right; totalLabel.AutoSize=true; totalLabel.Location=new Point(860,56); bottom.Controls.Add(totalLabel);
+            bottom.Resize += (s,e)=> { progress.Width = Math.Max(300,bottom.ClientSize.Width-8); speedLabel.Left=Math.Max(650,bottom.ClientSize.Width-speedLabel.Width-8); totalLabel.Left=Math.Max(650,bottom.ClientSize.Width-totalLabel.Width-8); };
+            root.Controls.Add(bottom,0,3);
+
+            speedTimer = new System.Windows.Forms.Timer { Interval=500 };
+            speedTimer.Tick += (s,e)=>UpdateSpeed();
+        }
+
+        Panel Card()
+        {
+            return new Panel { Dock=DockStyle.Fill, BackColor=Color.White, Padding=new Padding(1), Margin=new Padding(0) };
+        }
+        Label L(string s, float size, Color color, bool bold)
+        {
+            return new Label { Text=s, ForeColor=color, Font=new Font("Segoe UI",size,bold?FontStyle.Bold:FontStyle.Regular), AutoSize=true };
+        }
+        TextBox Box()
+        {
+            return new TextBox { Dock=DockStyle.Fill, BorderStyle=BorderStyle.FixedSingle, Font=new Font("Segoe UI",10f), Margin=new Padding(0,4,8,0) };
+        }
+        Button Btn(string text, Color bg, Color fg)
+        {
+            var b = new Button { Text=text, BackColor=bg, ForeColor=fg, FlatStyle=FlatStyle.Flat, Dock=DockStyle.Fill, Margin=new Padding(4,2,4,0), Font=new Font("Segoe UI",9.2f,FontStyle.Bold), Cursor=Cursors.Hand };
+            b.FlatAppearance.BorderSize=0; return b;
+        }
+        NumericUpDown Num(decimal min, decimal max, decimal value)
+        {
+            return new NumericUpDown { Minimum=min, Maximum=max, Value=value, Dock=DockStyle.Fill, Margin=new Padding(0,4,8,0), Font=new Font("Segoe UI",10f) };
+        }
+
+        string BaseUrl
+        {
+            get
+            {
+                var s=(addressBox.Text??"").Trim().TrimEnd('/');
+                if (!s.StartsWith("http://",StringComparison.OrdinalIgnoreCase) && !s.StartsWith("https://",StringComparison.OrdinalIgnoreCase)) s="http://"+s;
+                return s;
+            }
+        }
+        string Pin { get { return (pinBox.Text??"").Trim(); } }
+
+        async Task AutoDetectAsync()
+        {
+            SetStatus("Looking for FlashDrop on your current Wi‑Fi/hotspot…", false);
+            detectBtn.Enabled=false;
+            try
+            {
+                var gateways = NetworkInterface.GetAllNetworkInterfaces()
+                    .Where(n=>n.OperationalStatus==OperationalStatus.Up)
+                    .SelectMany(n=>n.GetIPProperties().GatewayAddresses)
+                    .Select(g=>g.Address)
+                    .Where(a=>a.AddressFamily==AddressFamily.InterNetwork && !IPAddress.IsLoopback(a))
+                    .Select(a=>a.ToString()).Distinct().ToList();
+                foreach(var ip in gateways)
+                {
+                    for(int p=8080;p<=8090;p++)
+                    {
+                        var u="http://"+ip+":"+p;
+                        if(await LooksLikeFlashDrop(u))
+                        {
+                            addressBox.Text=u;
+                            connectionLabel.Text="Phone found";
+                            connectionLabel.ForeColor=Green;
+                            SetStatus("Phone detected. Enter the 6‑digit PIN shown in FlashDrop, then click Connect.", false);
+                            return;
+                        }
+                    }
+                }
+                connectionLabel.Text="Not detected"; connectionLabel.ForeColor=Color.FromArgb(180,90,35);
+                SetStatus("Auto-detect did not find the phone. Enter the HTTP address shown in the Android app.", true);
+            }
+            catch(Exception ex){ SetStatus("Detection error: "+ex.Message,true); }
+            finally{ detectBtn.Enabled=true; }
+        }
+
+        async Task<bool> LooksLikeFlashDrop(string u)
+        {
+            return await Task.Run(()=>{
+                try
+                {
+                    var req=(HttpWebRequest)WebRequest.Create(u+"/"); req.Method="GET"; req.Timeout=450; req.ReadWriteTimeout=450; req.Proxy=null;
+                    using(var res=(HttpWebResponse)req.GetResponse()) using(var sr=new StreamReader(res.GetResponseStream()))
+                    {
+          
