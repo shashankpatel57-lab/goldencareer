@@ -1,4 +1,4 @@
-      var title = LabelX("FLASHDROP TURBO 3", 23, Color.White, true);
+          var title = LabelX("FLASHDROP TURBO 3", 23, Color.White, true);
             title.Location = new Point(26, 14);
             hero.Controls.Add(title);
 
@@ -199,4 +199,4 @@
             progress = new ProgressBar
             {
                 Dock = DockStyle.Fill,
-                Style = ProgressBarStyle.Continuous,
+                Style = ProgressBarStyle.Conti

@@ -1,4 +1,3 @@
-
             speedSampleBytes = nowBytes;
             speedSampleAt = now;
 

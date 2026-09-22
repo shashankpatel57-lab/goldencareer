@@ -1,4 +1,4 @@
-sk<FtpResponse> ReadResponseAsync(int timeoutMs, CancellationToken token)
+Task<FtpResponse> ReadResponseAsync(int timeoutMs, CancellationToken token)
         {
             string first = await ReadLineWithTimeoutAsync(reader, timeoutMs, token);
             if (string.IsNullOrEmpty(first)) throw new IOException("FTP control connection closed");
@@ -243,4 +243,4 @@ sk<FtpResponse> ReadResponseAsync(int timeoutMs, CancellationToken token)
             var hero = new HeroPanel { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 10) };
             outer.Controls.Add(hero, 0, 0);
 
-      
+  

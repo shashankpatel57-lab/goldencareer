@@ -1,4 +1,4 @@
-f.Size;
+eady += f.Size;
                         continue;
                     }
 
@@ -79,7 +79,7 @@ f.Size;
                                         ftp = null;
 
                                         if (attempt < 4)
-                                            await Task.Delay(250 * attempt, token);
+                                            Thread.Sleep(250 * attempt);
                                     }
                                 }
 
