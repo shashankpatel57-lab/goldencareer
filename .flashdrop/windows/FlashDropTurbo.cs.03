@@ -1,4 +1,15 @@
-} finally{ToggleConnect(true);}
+Color=Color.FromArgb(32,74,156); li.Font=new Font(remoteList.Font,FontStyle.Bold);}
+                    remoteList.Items.Add(li);
+                }
+                connectionLabel.Text="Connected"; connectionLabel.ForeColor=Green;
+                SetStatus("Connected. Double-click a folder to open it; START TURBO COPY downloads the current folder tree.",false);
+            }
+            catch(WebException ex)
+            {
+                connectionLabel.Text="Connection failed"; connectionLabel.ForeColor=Color.Firebrick;
+                SetStatus(WebMessage(ex),true);
+            }
+            catch(Exception ex){SetStatus(ex.Message,true);} finally{ToggleConnect(true);}
         }
 
         async Task<ListResponse> GetListAsync(string path, CancellationToken token)
@@ -135,7 +146,7 @@
                 smoothedMbps=0;
                 speedTimer.Start();
 
-                SetStatus("Stable Turbo v1.6 running — "+workers+" sequential streams • automatic stall recovery.",false);
+                SetStatus("Continuous Turbo v1.7 running — "+workers+" persistent lanes • RAM write-ahead buffering.",false);
 
                 var errors=new ConcurrentQueue<string>();
                 var tasks=new List<Task>();
@@ -143,25 +154,18 @@
                 for(int i=0;i<workers;i++)
                 {
                     tasks.Add(Task.Run(async()=>{
-                        RemoteFile file;
-                        while(!token.IsCancellationRequested && jobs.TryDequeue(out file))
+                        using(var session=new TurboSession(TurboHost,TurboPort,Pin))
                         {
-                            bool ok=false;
-                            Exception last=null;
+                            RemoteFile file;
 
-                            for(int attempt=1;attempt<=3 && !ok && !token.IsCancellationRequested;attempt++)
+                            while(!token.IsCancellationRequested && jobs.TryDequeue(out file))
                             {
-                                try
-                                {
-                                    await DownloadFileTurboAsync(file,token);
-                                    ok=true;
-                                }
-                                catch(Exception ex)
-                                {
-                                    last=ex;
-                                    Thread.Sleep(350*attempt);
-                                }
-                            }
+                                bool ok=false;
+                                Exception last=null;
 
-                            if(!ok)
-      
+                                for(int attempt=1;attempt<=4 && !ok && !token.IsCancellationRequested;attempt++)
+                                {
+                                    try
+                                    {
+                                        await DownloadFileTurboAsync(file,session,token);
+                                        ok=t

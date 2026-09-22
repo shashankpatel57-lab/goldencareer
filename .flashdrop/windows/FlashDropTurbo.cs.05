@@ -1,9 +1,14 @@
-)
+/1048576d/Math.Max(.001,sw.Elapsed.TotalSeconds);
+        }
+
+        async Task DownloadFileTurboAsync(RemoteFile file,TurboSession session,CancellationToken token)
         {
             long offset=0;
+
             if(File.Exists(file.PartPath))
             {
                 offset=new FileInfo(file.PartPath).Length;
+
                 if(offset<0 || offset>file.Size)
                 {
                     File.Delete(file.PartPath);
@@ -11,62 +16,87 @@
                 }
             }
 
-            using(var client=new TcpClient())
-            {
-                client.NoDelay=true;
-                client.ReceiveBufferSize=4*1024*1024;
-                client.SendBufferSize=1024*1024;
-                await client.ConnectAsync(TurboHost,TurboPort);
+            await session.SendGetAsync(file.RemotePath,offset,token);
 
-                using(var ns=client.GetStream())
-                using(token.Register(()=>{try{client.Close();}catch{}}))
+            NetworkStream ns=session.Stream;
+            string line=await ReadAsciiLineAsync(ns,token);
+
+            if(!line.StartsWith("OK "))
+                throw new IOException("Turbo server: "+line);
+
+            string[] p=line.Split(new[]{' '},StringSplitOptions.RemoveEmptyEntries);
+            long remaining=p.Length>1?long.Parse(p[1]):(file.Size-offset);
+
+            int bufferBytes=(int)chunkBox.Value*1024*1024;
+            bufferBytes=Math.Max(1024*1024,Math.Min(8*1024*1024,bufferBytes));
+
+            // 8 queued blocks per lane: at 4 MB and 3 workers this can absorb
+            // roughly 96 MB of brief Windows/disk scheduling pauses.
+            int queueDepth=8;
+            var free=new BlockingCollection<byte[]>(queueDepth);
+            var ready=new BlockingCollection<WriteBlock>(queueDepth);
+
+            for(int i=0;i<queueDepth;i++)
+                free.Add(new byte[bufferBytes]);
+
+            long gotFromNetwork=0;
+            Exception producerError=null;
+
+            var writer=Task.Run(()=>{
+                using(var fs=new FileStream(
+                    file.PartPath,
+                    FileMode.OpenOrCreate,
+                    FileAccess.Write,
+                    FileShare.Read,
+                    bufferBytes,
+                    FileOptions.SequentialScan))
                 {
-                    string encoded=Convert.ToBase64String(Encoding.UTF8.GetBytes(file.RemotePath??""));
-                    string request=
-                        "FLASHDROP/1\n"+
-                        "PIN "+Pin+"\n"+
-                        "MODE GET\n"+
-                        "PATH "+encoded+"\n"+
-                        "OFFSET "+offset+"\n\n";
+                    fs.Seek(offset,SeekOrigin.Begin);
+                    if(fs.Length!=offset)fs.SetLength(offset);
 
-                    byte[] hdr=Encoding.UTF8.GetBytes(request);
-                    await ns.WriteAsync(hdr,0,hdr.Length,token);
-
-                    string line=await ReadAsciiLineAsync(ns,token);
-                    if(!line.StartsWith("OK "))throw new IOException("Turbo server: "+line);
-
-                    string[] p=line.Split(new[]{' '},StringSplitOptions.RemoveEmptyEntries);
-                    long remaining=p.Length>1?long.Parse(p[1]):(file.Size-offset);
-
-                    int bufferBytes=(int)chunkBox.Value*1024*1024;
-                    bufferBytes=Math.Max(256*1024,Math.Min(8*1024*1024,bufferBytes));
-                    byte[] buf=new byte[bufferBytes];
-
-                    using(var fs=new FileStream(
-                        file.PartPath,
-                        FileMode.OpenOrCreate,
-                        FileAccess.Write,
-                        FileShare.Read,
-                        bufferBytes,
-                        FileOptions.SequentialScan | FileOptions.Asynchronous))
+                    foreach(var block in ready.GetConsumingEnumerable())
                     {
-                        fs.Seek(offset,SeekOrigin.Begin);
-                        if(fs.Length!=offset)fs.SetLength(offset);
-
-                        long got=0;
-                        while(got<remaining)
-                        {
-                            token.ThrowIfCancellationRequested();
-                            int n=await ReadWithTimeoutAsync(ns,buf,0,(int)Math.Min(buf.Length,remaining-got),token,12000);
-                            if(n<=0)break;
-                            await fs.WriteAsync(buf,0,n,token);
-                            got+=n;
-                            Interlocked.Add(ref completedBytes,n);
-                        }
-                        if(got!=remaining)throw new IOException("Short read "+got+"/"+remaining);
+                        token.ThrowIfCancellationRequested();
+                        fs.Write(block.Buffer,0,block.Count);
+                        Interlocked.Add(ref completedBytes,block.Count);
+                        free.Add(block.Buffer);
                     }
                 }
+            },token);
+
+            try
+            {
+                while(gotFromNetwork<remaining)
+                {
+                    token.ThrowIfCancellationRequested();
+
+                    byte[] buf=free.Take(token);
+                    int want=(int)Math.Min(buf.Length,remaining-gotFromNetwork);
+
+                    int n=await ReadWithTimeoutAsync(ns,buf,0,want,token,12000);
+
+                    if(n<=0)
+                    {
+                        free.Add(buf);
+                        break;
+                    }
+
+                    gotFromNetwork+=n;
+                    ready.Add(new WriteBlock{Buffer=buf,Count=n},token);
+                }
             }
+            catch(Exception ex)
+            {
+                producerError=ex;
+            }
+
+            ready.CompleteAdding();
+            await writer;
+
+            if(producerError!=null)throw producerError;
+
+            if(gotFromNetwork!=remaining)
+                throw new IOException("Short read "+gotFromNetwork+"/"+remaining);
         }
 
         async Task<int> ReadWithTimeoutAsync(Stream input,byte[] buffer,int offset,int count,CancellationToken token,int timeoutMs)

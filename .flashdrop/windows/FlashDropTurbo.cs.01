@@ -1,4 +1,34 @@
-55,252,232);
+           ColumnCount = 7,
+                RowCount = 3,
+                Padding = new Padding(14,10,14,10),
+                BackColor = Color.White
+            };
+            grid.RowStyles.Add(new RowStyle(SizeType.Absolute,24));
+            grid.RowStyles.Add(new RowStyle(SizeType.Absolute,42));
+            grid.RowStyles.Add(new RowStyle(SizeType.Percent,100));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,38));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,100));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,105));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,105));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,88));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,92));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,20));
+            connectCard.Controls.Add(grid);
+
+            grid.Controls.Add(L("PHONE HTTP ADDRESS",8.5f,Muted,true),0,0);
+            grid.Controls.Add(L("6-DIGIT PIN",8.5f,Muted,true),1,0);
+            grid.Controls.Add(L("WORKERS",8.5f,Muted,true),4,0);
+            grid.Controls.Add(L("BUFFER MB",8.5f,Muted,true),5,0);
+
+            addressBox = Box();
+            addressBox.Text = "http://192.168.1.1:8080";
+            grid.Controls.Add(addressBox,0,1);
+
+            pinBox = Box();
+            pinBox.MaxLength = 6;
+            pinBox.TextAlign = HorizontalAlignment.Center;
+            pinBox.Font = new Font("Segoe UI",11f,FontStyle.Bold);
+            pinBox.BackColor = Color.FromArgb(255,252,232);
             grid.Controls.Add(pinBox,1,1);
 
             detectBtn = Btn("AUTO DETECT", Color.FromArgb(232,237,255), Blue);
@@ -111,7 +141,7 @@
             destCard.Controls.Add(d);
 
             d.Controls.Add(L("DESTINATION ON THIS PC",9,Muted,true),0,0);
-            var turboNote=L("Stable Turbo • 3 workers / 4 MB buffer recommended",8.8f,Muted,false);
+            var turboNote=L("Continuous Turbo • persistent lanes • RAM write-ahead buffering",8.8f,Muted,false);
             turboNote.Dock=DockStyle.Fill;
             turboNote.TextAlign=ContentAlignment.MiddleRight;
             d.SetColumnSpan(turboNote,4);
@@ -129,28 +159,4 @@
             openBtn.Click+=(s,e)=>OpenDestination();
             d.Controls.Add(openBtn,2,1);
 
-            startBtn=Btn("START TURBO COPY",Green,Color.White);
-            startBtn.Font=new Font("Segoe UI",10f,FontStyle.Bold);
-            startBtn.Click+=async(s,e)=>await StartTransferAsync();
-            d.Controls.Add(startBtn,3,1);
-
-            cancelBtn=Btn("CANCEL",Color.FromArgb(255,236,238),Color.FromArgb(185,45,55));
-            cancelBtn.Enabled=false;
-            cancelBtn.Click+=(s,e)=>{ if(cts!=null) cts.Cancel(); };
-            d.Controls.Add(cancelBtn,4,1);
-
-            var bottom = new TableLayoutPanel {
-                Dock=DockStyle.Fill,
-                ColumnCount=3,
-                RowCount=2,
-                Padding=new Padding(2,8,2,0),
-                BackColor=Bg
-            };
-            bottom.RowStyles.Add(new RowStyle(SizeType.Absolute,28));
-            bottom.RowStyles.Add(new RowStyle(SizeType.Percent,100));
-            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
-            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,150));
-            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,235));
-            outer.Controls.Add(bottom,0,4);
-
-            progress = new Pr
+            startBtn=Btn("START TURBO COP

@@ -100,9 +100,75 @@ namespace FlashDropTurbo
         System.Windows.Forms.Timer speedTimer;
         readonly JavaScriptSerializer json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
 
+        sealed class WriteBlock
+        {
+            public byte[] Buffer;
+            public int Count;
+        }
+
+        sealed class TurboSession : IDisposable
+        {
+            readonly string host;
+            readonly int port;
+            readonly string pin;
+            TcpClient client;
+            NetworkStream stream;
+
+            public TurboSession(string host,int port,string pin)
+            {
+                this.host=host;
+                this.port=port;
+                this.pin=pin;
+            }
+
+            public NetworkStream Stream { get { return stream; } }
+
+            public async Task EnsureConnectedAsync()
+            {
+                if(client!=null && stream!=null && client.Connected)return;
+
+                Close();
+
+                client=new TcpClient();
+                client.NoDelay=true;
+                client.ReceiveBufferSize=4*1024*1024;
+                client.SendBufferSize=1024*1024;
+                await client.ConnectAsync(host,port);
+                stream=client.GetStream();
+                stream.ReadTimeout=15000;
+                stream.WriteTimeout=15000;
+            }
+
+            public async Task SendGetAsync(string remotePath,long offset,CancellationToken token)
+            {
+                await EnsureConnectedAsync();
+
+                string encoded=Convert.ToBase64String(Encoding.UTF8.GetBytes(remotePath??""));
+                string request=
+                    "FLASHDROP/1\n"+
+                    "PIN "+pin+"\n"+
+                    "MODE GET\n"+
+                    "PATH "+encoded+"\n"+
+                    "OFFSET "+offset+"\n\n";
+
+                byte[] hdr=Encoding.UTF8.GetBytes(request);
+                await stream.WriteAsync(hdr,0,hdr.Length,token);
+            }
+
+            public void Close()
+            {
+                try{if(stream!=null)stream.Dispose();}catch{}
+                try{if(client!=null)client.Close();}catch{}
+                stream=null;
+                client=null;
+            }
+
+            public void Dispose(){Close();}
+        }
+
         public MainForm()
         {
-            Text = "FlashDrop Turbo v1.6 - by Shashank Patel";
+            Text = "FlashDrop Turbo v1.7 - by Shashank Patel";
             StartPosition = FormStartPosition.CenterScreen;
             MinimumSize = new Size(1000, 720);
             Size = new Size(1180, 820);
@@ -155,34 +221,4 @@ namespace FlashDropTurbo
 
             var grid = new TableLayoutPanel {
                 Dock = DockStyle.Fill,
-                ColumnCount = 7,
-                RowCount = 3,
-                Padding = new Padding(14,10,14,10),
-                BackColor = Color.White
-            };
-            grid.RowStyles.Add(new RowStyle(SizeType.Absolute,24));
-            grid.RowStyles.Add(new RowStyle(SizeType.Absolute,42));
-            grid.RowStyles.Add(new RowStyle(SizeType.Percent,100));
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,38));
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,100));
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,105));
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,105));
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,88));
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,92));
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,20));
-            connectCard.Controls.Add(grid);
-
-            grid.Controls.Add(L("PHONE HTTP ADDRESS",8.5f,Muted,true),0,0);
-            grid.Controls.Add(L("6-DIGIT PIN",8.5f,Muted,true),1,0);
-            grid.Controls.Add(L("WORKERS",8.5f,Muted,true),4,0);
-            grid.Controls.Add(L("BUFFER MB",8.5f,Muted,true),5,0);
-
-            addressBox = Box();
-            addressBox.Text = "http://192.168.1.1:8080";
-            grid.Controls.Add(addressBox,0,1);
-
-            pinBox = Box();
-            pinBox.MaxLength = 6;
-            pinBox.TextAlign = HorizontalAlignment.Center;
-            pinBox.Font = new Font("Segoe UI",11f,FontStyle.Bold);
-            pinBox.BackColor = Color.FromArgb(2
+     

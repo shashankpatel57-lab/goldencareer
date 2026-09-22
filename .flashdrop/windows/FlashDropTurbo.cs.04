@@ -1,21 +1,36 @@
-                      {
-                                errors.Enqueue(file.RemotePath+" : "+(last==null?"transfer failed":last.Message));
-                                continue;
-                            }
+rue;
+                                    }
+                                    catch(Exception ex)
+                                    {
+                                        last=ex;
+                                        session.Close();
+                                        Thread.Sleep(250*attempt);
+                                    }
+                                }
 
-                            try
-                            {
-                                long got=File.Exists(file.PartPath)?new FileInfo(file.PartPath).Length:0;
-                                if(got!=file.Size)throw new IOException("Incomplete file "+got+"/"+file.Size);
+                                if(!ok)
+                                {
+                                    errors.Enqueue(file.RemotePath+" : "+(last==null?"transfer failed":last.Message));
+                                    continue;
+                                }
 
-                                if(File.Exists(file.FinalPath))File.Delete(file.FinalPath);
-                                File.Move(file.PartPath,file.FinalPath);
-                                if(file.Modified>0)
-                                    File.SetLastWriteTime(file.FinalPath,DateTimeOffset.FromUnixTimeMilliseconds(file.Modified).LocalDateTime);
-                            }
-                            catch(Exception ex)
-                            {
-                                errors.Enqueue(file.RemotePath+" : "+ex.Message);
+                                try
+                                {
+                                    long got=File.Exists(file.PartPath)?new FileInfo(file.PartPath).Length:0;
+                                    if(got!=file.Size)throw new IOException("Incomplete file "+got+"/"+file.Size);
+
+                                    if(File.Exists(file.FinalPath))File.Delete(file.FinalPath);
+                                    File.Move(file.PartPath,file.FinalPath);
+
+                                    if(file.Modified>0)
+                                        File.SetLastWriteTime(
+                                            file.FinalPath,
+                                            DateTimeOffset.FromUnixTimeMilliseconds(file.Modified).LocalDateTime);
+                                }
+                                catch(Exception ex)
+                                {
+                                    errors.Enqueue(file.RemotePath+" : "+ex.Message);
+                                }
                             }
                         }
                     },token));
@@ -174,7 +189,4 @@
                 }
             }
             sw.Stop();
-            return bytes/1048576d/Math.Max(.001,sw.Elapsed.TotalSeconds);
-        }
-
-        async Task DownloadFileTurboAsync(RemoteFile file,CancellationToken token
+            return bytes
