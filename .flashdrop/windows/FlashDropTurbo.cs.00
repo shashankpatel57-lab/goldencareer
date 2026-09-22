@@ -1,0 +1,131 @@
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.IO;
+using System.Linq;
+using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Web.Script.Serialization;
+using System.Windows.Forms;
+
+namespace FlashDropTurbo
+{
+    static class Program
+    {
+        [STAThread]
+        static void Main()
+        {
+            ServicePointManager.DefaultConnectionLimit = 64;
+            ServicePointManager.Expect100Continue = false;
+            ServicePointManager.UseNagleAlgorithm = false;
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+            Application.Run(new MainForm());
+        }
+    }
+
+    sealed class HeroPanel : Panel
+    {
+        public Color A = Color.FromArgb(53, 62, 246);
+        public Color B = Color.FromArgb(9, 180, 154);
+        public HeroPanel() { DoubleBuffered = true; }
+        protected override void OnPaintBackground(PaintEventArgs e)
+        {
+            using (var br = new LinearGradientBrush(ClientRectangle, A, B, 18f)) e.Graphics.FillRectangle(br, ClientRectangle);
+        }
+    }
+
+    sealed class PhoneItem
+    {
+        public string name { get; set; }
+        public string path { get; set; }
+        public bool dir { get; set; }
+        public long size { get; set; }
+        public long modified { get; set; }
+    }
+
+    sealed class ListResponse
+    {
+        public string path { get; set; }
+        public PhoneItem[] items { get; set; }
+        public string error { get; set; }
+    }
+
+    sealed class RemoteFile
+    {
+        public string RemotePath;
+        public string RelativePath;
+        public long Size;
+        public long Modified;
+        public string FinalPath;
+        public string PartPath;
+        public int RemainingChunks;
+    }
+
+    sealed class ChunkJob
+    {
+        public RemoteFile File;
+        public long Start;
+        public long End;
+    }
+
+    sealed class MainForm : Form
+    {
+        readonly Color Ink = Color.FromArgb(18, 28, 50);
+        readonly Color Muted = Color.FromArgb(98, 108, 128);
+        readonly Color Blue = Color.FromArgb(63, 77, 246);
+        readonly Color Green = Color.FromArgb(13, 160, 130);
+        readonly Color Bg = Color.FromArgb(245, 247, 252);
+
+        TextBox addressBox, pinBox, localBox;
+        Label connectionLabel, pathLabel, statusLabel, speedLabel, totalLabel;
+        ListView remoteList;
+        Button detectBtn, connectBtn, upBtn, refreshBtn, browseBtn, startBtn, cancelBtn, openBtn;
+        NumericUpDown workersBox, chunkBox;
+        ProgressBar progress;
+        string currentPath = "";
+        CancellationTokenSource cts;
+        long totalBytes, completedBytes;
+        Stopwatch transferWatch;
+        System.Windows.Forms.Timer speedTimer;
+        readonly JavaScriptSerializer json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
+
+        public MainForm()
+        {
+            Text = "FlashDrop Turbo — by Shashank Patel";
+            StartPosition = FormStartPosition.CenterScreen;
+            MinimumSize = new Size(940, 650);
+            Size = new Size(1120, 760);
+            BackColor = Bg;
+            Font = new Font("Segoe UI", 9.5f);
+            Icon = SystemIcons.Shield;
+            BuildUi();
+            Shown += async (s, e) => await AutoDetectAsync();
+        }
+
+        void BuildUi()
+        {
+            var hero = new HeroPanel { Dock = DockStyle.Top, Height = 116, Padding = new Padding(28, 18, 28, 16) };
+            Controls.Add(hero);
+            var title = L("FLASHDROP TURBO", 23, Color.White, true); title.Location = new Point(28, 18); title.AutoSize = true; hero.Controls.Add(title);
+            var sub = L("Parallel 5 GHz phone → Windows transfer • no ZIP • no script", 11.5f, Color.FromArgb(235, 245, 255), false); sub.Location = new Point(30, 57); sub.AutoSize = true; hero.Controls.Add(sub);
+            var by = L("Designed & built by Shashank Patel", 9.5f, Color.FromArgb(225, 245, 240), true); by.Location = new Point(30, 82); by.AutoSize = true; hero.Controls.Add(by);
+
+            var root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(22, 18, 22, 16), ColumnCount = 1, RowCount = 4, BackColor = Bg };
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            Controls.Add(root); root.BringToFront(); hero.BringToFront();
+
+            var connectCard = Card();
+            connectCard.Height = 105;
+            var grid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 7, RowCount = 2, Padding = new Padding(14, 10, 14, 10) };
+            grid.ColumnSt
