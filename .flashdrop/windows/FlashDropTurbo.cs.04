@@ -35,7 +35,7 @@
                         bool ok=false; Exception last=null;
                         for(int attempt=1;attempt<=3 && !ok && !token.IsCancellationRequested;attempt++)
                         {
-                            try{await DownloadChunkAsync(job,token);ok=true;}catch(Exception ex){last=ex;await Task.Delay(250*attempt,token).ContinueWith(_=>{});}
+                            try{await DownloadChunkAsync(job,token);ok=true;}catch(Exception ex){last=ex;Thread.Sleep(250*attempt);}
                         }
                         if(!ok){errors.Enqueue(job.File.RemotePath+" : "+(last==null?"transfer failed":last.Message)); continue;}
                         if(Interlocked.Decrement(ref job.File.RemainingChunks)==0)
