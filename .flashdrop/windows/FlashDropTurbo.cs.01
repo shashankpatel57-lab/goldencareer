@@ -1,212 +1,246 @@
-=> await LoadFolderAsync(currentPath);
-            grid.Controls.Add(connectBtn,3,1);
-
-            workersBox = Num(1,6,3);
-            grid.Controls.Add(workersBox,4,1);
-
-            chunkBox = Num(1,8,2);
-            grid.Controls.Add(chunkBox,5,1);
-
-            connectionLabel = L("Waiting for phone...",9.5f,Muted,true);
-            connectionLabel.Dock = DockStyle.Fill;
-            connectionLabel.TextAlign = ContentAlignment.MiddleLeft;
-            grid.Controls.Add(connectionLabel,6,1);
-
-            var hint = L("1. Auto Detect   2. Enter PIN from phone   3. Connect   4. Choose phone folder and PC destination",9.2f,Color.FromArgb(75,87,112),false);
-            hint.Dock = DockStyle.Fill;
-            hint.TextAlign = ContentAlignment.MiddleLeft;
-            grid.SetColumnSpan(hint,7);
-            grid.Controls.Add(hint,0,2);
-
-            pinBox.KeyDown += async (s,e) => {
-                if(e.KeyCode==Keys.Enter) {
-                    e.SuppressKeyPress=true;
-                    await LoadFolderAsync(currentPath);
-                }
-            };
-
-            var browserCard = Card();
-            browserCard.Margin = new Padding(0,0,0,10);
-            outer.Controls.Add(browserCard,0,2);
-
-            var browser = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor=Color.White };
-            browser.RowStyles.Add(new RowStyle(SizeType.Absolute,52));
-            browser.RowStyles.Add(new RowStyle(SizeType.Percent,100));
-            browserCard.Controls.Add(browser);
-
-            var nav = new TableLayoutPanel {
-                Dock=DockStyle.Fill,
-                ColumnCount=4,
-                RowCount=1,
-                Padding=new Padding(12,8,12,6),
-                BackColor=Color.FromArgb(249,250,253)
-            };
-            nav.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,82));
-            nav.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,104));
-            nav.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
-            nav.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,165));
-            browser.Controls.Add(nav,0,0);
-
-            upBtn = Btn("UP",Color.FromArgb(240,244,250),Ink);
-            upBtn.Click += async(s,e) => await UpAsync();
-            nav.Controls.Add(upBtn,0,0);
-
-            refreshBtn = Btn("REFRESH",Color.FromArgb(240,244,250),Ink);
-            refreshBtn.Click += async(s,e) => await LoadFolderAsync(currentPath);
-            nav.Controls.Add(refreshBtn,1,0);
-
-            pathLabel = L("Internal storage",10,Ink,true);
-            pathLabel.Dock=DockStyle.Fill;
-            pathLabel.TextAlign=ContentAlignment.MiddleLeft;
-            pathLabel.AutoEllipsis=true;
-            nav.Controls.Add(pathLabel,2,0);
-
-            var browseHint=L("Double-click folder to open",8.8f,Muted,false);
-            browseHint.Dock=DockStyle.Fill;
-            browseHint.TextAlign=ContentAlignment.MiddleRight;
-            nav.Controls.Add(browseHint,3,0);
-
-            remoteList = new ListView {
-                Dock = DockStyle.Fill,
-                View = View.Details,
-                FullRowSelect = true,
-                HideSelection = false,
-                BorderStyle = BorderStyle.None,
-                BackColor = Color.White,
-                Font = new Font("Segoe UI",9.5f)
-            };
-            remoteList.Columns.Add("Name",520);
-            remoteList.Columns.Add("Type",105);
-            remoteList.Columns.Add("Size",125);
-            remoteList.Columns.Add("Modified",180);
-            remoteList.DoubleClick += async (s,e) => await OpenSelectedAsync();
-            browser.Controls.Add(remoteList,0,1);
-
-            var destCard = Card();
-            destCard.Margin = new Padding(0,0,0,10);
-            outer.Controls.Add(destCard,0,3);
-
-            var d = new TableLayoutPanel {
-                Dock=DockStyle.Fill,
-                ColumnCount=5,
-                RowCount=2,
-                Padding=new Padding(14,10,14,10),
-                BackColor=Color.White
-            };
-            d.RowStyles.Add(new RowStyle(SizeType.Absolute,28));
-            d.RowStyles.Add(new RowStyle(SizeType.Percent,100));
-            d.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
-            d.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,130));
-            d.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,125));
-            d.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,190));
-            d.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,115));
-            destCard.Controls.Add(d);
-
-            d.Controls.Add(L("DESTINATION ON THIS PC",9,Muted,true),0,0);
-            var turboNote=L("Universal Turbo • new + legacy Android server compatible",8.8f,Muted,false);
-            turboNote.Dock=DockStyle.Fill;
-            turboNote.TextAlign=ContentAlignment.MiddleRight;
-            d.SetColumnSpan(turboNote,4);
-            d.Controls.Add(turboNote,1,0);
-
-            localBox = Box();
-            localBox.Text = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),"FlashDrop");
-            d.Controls.Add(localBox,0,1);
-
-            browseBtn=Btn("CHOOSE FOLDER",Color.FromArgb(229,248,241),Green);
-            browseBtn.Click+=(s,e)=>ChooseFolder();
-            d.Controls.Add(browseBtn,1,1);
-
-            openBtn=Btn("OPEN FOLDER",Color.FromArgb(240,244,250),Ink);
-            openBtn.Click+=(s,e)=>OpenDestination();
-            d.Controls.Add(openBtn,2,1);
-
-            startBtn=Btn("START TURBO COPY",Green,Color.White);
-            startBtn.Font=new Font("Segoe UI",10f,FontStyle.Bold);
-            startBtn.Click+=async(s,e)=>await StartTransferAsync();
-            d.Controls.Add(startBtn,3,1);
-
-            cancelBtn=Btn("CANCEL",Color.FromArgb(255,236,238),Color.FromArgb(185,45,55));
-            cancelBtn.Enabled=false;
-            cancelBtn.Click+=(s,e)=>{ if(cts!=null) cts.Cancel(); };
-            d.Controls.Add(cancelBtn,4,1);
-
-            var bottom = new TableLayoutPanel {
-                Dock=DockStyle.Fill,
-                ColumnCount=3,
-                RowCount=2,
-                Padding=new Padding(2,8,2,0),
-                BackColor=Bg
-            };
-            bottom.RowStyles.Add(new RowStyle(SizeType.Absolute,28));
-            bottom.RowStyles.Add(new RowStyle(SizeType.Percent,100));
-            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
-            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,150));
-            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,235));
-            outer.Controls.Add(bottom,0,4);
-
-            progress = new ProgressBar {
-                Dock=DockStyle.Fill,
-                Style=ProgressBarStyle.Continuous,
-                Maximum=1000,
-                Margin=new Padding(0,3,0,5)
-            };
-            bottom.SetColumnSpan(progress,3);
-            bottom.Controls.Add(progress,0,0);
-
-            statusLabel=L("Ready. Universal Turbo v2.3 • /api/file + legacy /download fallback.",9.5f,Muted,false);
-            statusLabel.Dock=DockStyle.Fill;
-            statusLabel.TextAlign=ContentAlignment.MiddleLeft;
-            statusLabel.AutoEllipsis=true;
-            bottom.Controls.Add(statusLabel,0,1);
-
-            speedLabel=L("0.0 MB/s",12,Blue,true);
-            speedLabel.Dock=DockStyle.Fill;
-            speedLabel.TextAlign=ContentAlignment.MiddleRight;
-            bottom.Controls.Add(speedLabel,1,1);
-
-            totalLabel=L("Waiting to transfer",9,Muted,false);
-            totalLabel.Dock=DockStyle.Fill;
-            totalLabel.TextAlign=ContentAlignment.MiddleRight;
-            totalLabel.AutoEllipsis=true;
-            bottom.Controls.Add(totalLabel,2,1);
-
-            speedTimer = new System.Windows.Forms.Timer { Interval=500 };
-            speedTimer.Tick += (s,e)=>UpdateSpeed();
-
-            ResumeLayout(true);
-        }
-
-        Panel Card()
+sk<FtpResponse> ReadResponseAsync(int timeoutMs, CancellationToken token)
         {
-            return new Panel { Dock=DockStyle.Fill, BackColor=Color.White, Padding=new Padding(1), Margin=new Padding(0) };
-        }
+            string first = await ReadLineWithTimeoutAsync(reader, timeoutMs, token);
+            if (string.IsNullOrEmpty(first)) throw new IOException("FTP control connection closed");
+            if (first.Length < 3) throw new IOException("Invalid FTP response: " + first);
 
-        Label L(string s, float size, Color color, bool bold)
-        {
-            return new Label { Text=s, ForeColor=color, Font=new Font("Segoe UI",size,bold?FontStyle.Bold:FontStyle.Regular), AutoSize=true, BackColor=Color.Transparent };
-        }
+            int code;
+            if (!int.TryParse(first.Substring(0, 3), out code))
+                throw new IOException("Invalid FTP response: " + first);
 
-        TextBox Box()
-        {
-            return new TextBox { Dock=DockStyle.Fill, BorderStyle=BorderStyle.FixedSingle, Font=new Font("Segoe UI",10f), Margin=new Padding(0,4,8,3), BackColor=Color.White, ForeColor=Ink };
-        }
+            var all = new StringBuilder(first);
 
-        Button Btn(string text, Color bg, Color fg)
-        {
-            var b = new Button { Text=text, BackColor=bg, ForeColor=fg, FlatStyle=FlatStyle.Flat, Dock=DockStyle.Fill, Margin=new Padding(4,3,4,3), Font=new Font("Segoe UI",9.2f,FontStyle.Bold), Cursor=Cursors.Hand, UseVisualStyleBackColor=false };
-            b.FlatAppearance.BorderSize=0;
-            return b;
-        }
-
-        NumericUpDown Num(decimal min, decimal max, decimal value)
-        {
-            return new NumericUpDown { Minimum=min, Maximum=max, Value=value, Dock=DockStyle.Fill, Margin=new Padding(0,4,8,3), Font=new Font("Segoe UI",10f), BackColor=Color.White, ForeColor=Ink };
-        }
-
-        string BaseUrl
-        {
-            get
+            if (first.Length > 3 && first[3] == '-')
             {
-                var s=(addressBox.Text??"").Trim().TrimEnd('/');
-                if (!s.StartsWith("http://",StringComparison.OrdinalIgnoreCase) && !s.StartsWith("https://",StringComparison.OrdinalIgnoreCase)) s="http://
+                string terminator = code.ToString(CultureInfo.InvariantCulture) + " ";
+
+                while (true)
+                {
+                    string line = await ReadLineWithTimeoutAsync(reader, timeoutMs, token);
+                    if (line == null) throw new IOException("FTP control connection closed");
+                    all.Append("\n").Append(line);
+                    if (line.StartsWith(terminator, StringComparison.Ordinal)) break;
+                }
+            }
+
+            return new FtpResponse { Code = code, Text = all.ToString() };
+        }
+
+        static async Task<string> ReadLineWithTimeoutAsync(StreamReader r, int timeoutMs, CancellationToken token)
+        {
+            var task = r.ReadLineAsync();
+            var winner = await Task.WhenAny(task, Task.Delay(timeoutMs, token));
+            if (winner != task)
+            {
+                token.ThrowIfCancellationRequested();
+                throw new IOException("FTP control timed out");
+            }
+            return await task;
+        }
+
+        static async Task<int> ReadWithTimeoutAsync(
+            Stream input, byte[] buffer, int offset, int count, int timeoutMs, CancellationToken token)
+        {
+            var task = input.ReadAsync(buffer, offset, count, token);
+            var winner = await Task.WhenAny(task, Task.Delay(timeoutMs, token));
+            if (winner != task)
+            {
+                token.ThrowIfCancellationRequested();
+                throw new IOException("No file data received for " + (timeoutMs / 1000) + " seconds");
+            }
+            return await task;
+        }
+
+        static async Task ConnectTcpAsync(
+            TcpClient client, string host, int port, int timeoutMs, CancellationToken token)
+        {
+            var task = client.ConnectAsync(host, port);
+            var winner = await Task.WhenAny(task, Task.Delay(timeoutMs, token));
+            if (winner != task)
+            {
+                try { client.Close(); } catch { }
+                token.ThrowIfCancellationRequested();
+                throw new IOException("Connection timed out");
+            }
+            await task;
+        }
+
+        static List<FtpItem> ParseMlsd(string text, string parent)
+        {
+            var items = new List<FtpItem>();
+
+            using (var sr = new StringReader(text ?? ""))
+            {
+                string line;
+
+                while ((line = sr.ReadLine()) != null)
+                {
+                    line = line.TrimEnd('\r', '\n');
+                    if (line.Length == 0) continue;
+
+                    int space = line.IndexOf(' ');
+                    if (space < 0) continue;
+
+                    string facts = line.Substring(0, space);
+                    string name = line.Substring(space + 1);
+                    if (name.Length == 0 || name == "." || name == "..") continue;
+
+                    bool dir = false;
+                    long size = 0;
+                    DateTime modified = DateTime.MinValue;
+
+                    string[] fs = facts.Split(';');
+                    foreach (string f in fs)
+                    {
+                        int eq = f.IndexOf('=');
+                        if (eq <= 0) continue;
+
+                        string key = f.Substring(0, eq).Trim().ToLowerInvariant();
+                        string val = f.Substring(eq + 1).Trim();
+
+                        if (key == "type") dir = val.Equals("dir", StringComparison.OrdinalIgnoreCase);
+                        else if (key == "size") long.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out size);
+                        else if (key == "modify")
+                        {
+                            DateTime dt;
+                            if (DateTime.TryParseExact(
+                                val, "yyyyMMddHHmmss", CultureInfo.InvariantCulture,
+                                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out dt))
+                                modified = dt;
+                        }
+                    }
+
+                    items.Add(new FtpItem
+                    {
+                        Name = name,
+                        FullPath = CombineRemote(parent, name),
+                        IsDirectory = dir,
+                        Size = dir ? 0 : size,
+                        ModifiedUtc = modified
+                    });
+                }
+            }
+
+            items.Sort((a, b) =>
+            {
+                if (a.IsDirectory != b.IsDirectory) return a.IsDirectory ? -1 : 1;
+                return string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+            });
+
+            return items;
+        }
+
+        static string CombineRemote(string parent, string name)
+        {
+            string p = NormalizeRemote(parent);
+            if (p == "/") return "/" + name;
+            return p.TrimEnd('/') + "/" + name;
+        }
+
+        static string NormalizeRemote(string p)
+        {
+            p = (p ?? "/").Replace('\\', '/');
+            if (!p.StartsWith("/")) p = "/" + p;
+            while (p.Contains("//")) p = p.Replace("//", "/");
+            return p;
+        }
+
+        static void Expect(FtpResponse r, int code)
+        {
+            if (r.Code != code) throw new IOException("FTP " + code + " expected, got: " + r.Text);
+        }
+
+        void EnsureConnected()
+        {
+            if (control == null || reader == null || writer == null || !control.Connected)
+                throw new IOException("FTP session is not connected");
+        }
+
+        void DisposeControl()
+        {
+            try { if (writer != null) writer.Dispose(); } catch { }
+            try { if (reader != null) reader.Dispose(); } catch { }
+            try { if (control != null) control.Close(); } catch { }
+            writer = null;
+            reader = null;
+            control = null;
+        }
+
+        public void Dispose()
+        {
+            try
+            {
+                if (writer != null)
+                {
+                    writer.WriteLine("QUIT");
+                    writer.Flush();
+                }
+            }
+            catch { }
+
+            DisposeControl();
+        }
+    }
+
+    sealed class MainForm : Form
+    {
+        readonly Color Ink = Color.FromArgb(18, 29, 51);
+        readonly Color Muted = Color.FromArgb(100, 110, 130);
+        readonly Color Blue = Color.FromArgb(73, 63, 240);
+        readonly Color Green = Color.FromArgb(0, 148, 120);
+        readonly Color Bg = Color.FromArgb(245, 247, 252);
+
+        TextBox addressBox, localBox;
+        Label connectionLabel, pathLabel, statusLabel, speedLabel, totalLabel;
+        ListView remoteList;
+        Button detectBtn, connectBtn, upBtn, refreshBtn, browseBtn, openBtn, startBtn, cancelBtn;
+        NumericUpDown workersBox, bufferBox;
+        ProgressBar progress;
+
+        FtpEndpoint endpoint;
+        string currentPath = "/";
+        CancellationTokenSource transferCts;
+
+        long totalBytes;
+        long completedBytes;
+        long speedSampleBytes;
+        DateTime speedSampleAt;
+        double smoothedMbps;
+        System.Windows.Forms.Timer speedTimer;
+
+        public MainForm()
+        {
+            Text = "FlashDrop Turbo v3.0 - FTP Engine - by Shashank Patel";
+            StartPosition = FormStartPosition.CenterScreen;
+            MinimumSize = new Size(1000, 720);
+            Size = new Size(1180, 820);
+            BackColor = Bg;
+            Font = new Font("Segoe UI", 9.5f);
+            Icon = SystemIcons.Shield;
+            AutoScaleMode = AutoScaleMode.Dpi;
+            BuildUi();
+            Shown += async (s, e) => await AutoDetectAsync();
+        }
+
+        void BuildUi()
+        {
+            var outer = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 5,
+                BackColor = Bg,
+                Padding = new Padding(18, 14, 18, 14)
+            };
+
+            outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 108));
+            outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 126));
+            outer.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 120));
+            outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 96));
+            Controls.Add(outer);
+
+            var hero = new HeroPanel { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 10) };
+            outer.Controls.Add(hero, 0, 0);
+
+      

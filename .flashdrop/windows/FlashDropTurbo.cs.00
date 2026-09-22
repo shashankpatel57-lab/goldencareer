@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -12,7 +13,6 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
 namespace FlashDropTurbo
@@ -23,8 +23,6 @@ namespace FlashDropTurbo
         static void Main()
         {
             ServicePointManager.DefaultConnectionLimit = 64;
-            ServicePointManager.Expect100Continue = false;
-            ServicePointManager.UseNagleAlgorithm = false;
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.Run(new MainForm());
@@ -33,232 +31,245 @@ namespace FlashDropTurbo
 
     sealed class HeroPanel : Panel
     {
-        public Color A = Color.FromArgb(53, 62, 246);
-        public Color B = Color.FromArgb(9, 180, 154);
+        public Color A = Color.FromArgb(73, 63, 240);
+        public Color B = Color.FromArgb(0, 164, 137);
         public HeroPanel() { DoubleBuffered = true; }
         protected override void OnPaintBackground(PaintEventArgs e)
         {
-            using (var br = new LinearGradientBrush(ClientRectangle, A, B, 18f)) e.Graphics.FillRectangle(br, ClientRectangle);
+            using (var br = new LinearGradientBrush(ClientRectangle, A, B, 18f))
+                e.Graphics.FillRectangle(br, ClientRectangle);
         }
     }
 
-    sealed class PhoneItem
+    sealed class FtpResponse
     {
-        public string name { get; set; }
-        public string path { get; set; }
-        public bool dir { get; set; }
-        public long size { get; set; }
-        public long modified { get; set; }
+        public int Code;
+        public string Text;
     }
 
-    sealed class ListResponse
+    sealed class FtpItem
     {
-        public string path { get; set; }
-        public PhoneItem[] items { get; set; }
-        public string error { get; set; }
+        public string Name;
+        public string FullPath;
+        public bool IsDirectory;
+        public long Size;
+        public DateTime ModifiedUtc;
     }
 
     sealed class RemoteFile
     {
         public string RemotePath;
-        public string RelativePath;
-        public long Size;
-        public long Modified;
         public string FinalPath;
         public string PartPath;
-        public int RemainingChunks;
+        public long Size;
+        public DateTime ModifiedUtc;
     }
 
-    sealed class ChunkJob
+    sealed class FtpEndpoint
     {
-        public RemoteFile File;
-        public long Start;
-        public long End;
+        public string Host;
+        public int Port;
+        public override string ToString() { return "ftp://" + Host + ":" + Port + "/"; }
     }
 
-    sealed class MainForm : Form
+    sealed class FtpSession : IDisposable
     {
-        readonly Color Ink = Color.FromArgb(18, 28, 50);
-        readonly Color Muted = Color.FromArgb(98, 108, 128);
-        readonly Color Blue = Color.FromArgb(63, 77, 246);
-        readonly Color Green = Color.FromArgb(13, 160, 130);
-        readonly Color Bg = Color.FromArgb(245, 247, 252);
+        readonly string host;
+        readonly int port;
+        TcpClient control;
+        StreamReader reader;
+        StreamWriter writer;
 
-        TextBox addressBox, pinBox, localBox;
-        Label connectionLabel, pathLabel, statusLabel, speedLabel, totalLabel;
-        ListView remoteList;
-        Button detectBtn, connectBtn, upBtn, refreshBtn, browseBtn, startBtn, cancelBtn, openBtn;
-        NumericUpDown workersBox, chunkBox;
-        ProgressBar progress;
-        string currentPath = "";
-        CancellationTokenSource cts;
-        long totalBytes, completedBytes;
-        Stopwatch transferWatch;
-        long speedSampleBytes;
-        DateTime speedSampleAt;
-        double smoothedMbps;
-        bool compatibilityFtpMode;
-        readonly int compatibilityFtpPort = 2121;
-        System.Windows.Forms.Timer speedTimer;
-        readonly JavaScriptSerializer json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
-
-        sealed class WriteBlock
+        public FtpSession(string host, int port)
         {
-            public byte[] Buffer;
-            public int Count;
+            this.host = host;
+            this.port = port;
         }
 
-        sealed class TurboSession : IDisposable
+        public async Task ConnectAsync(CancellationToken token)
         {
-            readonly string host;
-            readonly int port;
-            readonly string pin;
-            TcpClient client;
-            NetworkStream stream;
+            DisposeControl();
 
-            public TurboSession(string host,int port,string pin)
+            control = new TcpClient();
+            control.NoDelay = true;
+            control.ReceiveBufferSize = 256 * 1024;
+            control.SendBufferSize = 256 * 1024;
+
+            await ConnectTcpAsync(control, host, port, 6000, token);
+
+            reader = new StreamReader(control.GetStream(), new UTF8Encoding(false), false, 16 * 1024);
+            writer = new StreamWriter(control.GetStream(), new UTF8Encoding(false), 16 * 1024);
+            writer.NewLine = "\r\n";
+            writer.AutoFlush = true;
+
+            var hello = await ReadResponseAsync(8000, token);
+            Expect(hello, 220);
+
+            var u = await CommandAsync("USER flashdrop", token);
+            if (u.Code != 230 && u.Code != 331) throw new IOException("FTP login failed: " + u.Text);
+
+            if (u.Code == 331)
             {
-                this.host=host;
-                this.port=port;
-                this.pin=pin;
+                var p = await CommandAsync("PASS turbo", token);
+                Expect(p, 230);
             }
 
-            public NetworkStream Stream { get { return stream; } }
+            var o = await CommandAsync("OPTS UTF8 ON", token);
+            if (o.Code >= 400) { }
 
-            public async Task EnsureConnectedAsync()
-            {
-                if(client!=null && stream!=null && client.Connected)return;
-
-                Close();
-
-                client=new TcpClient();
-                client.NoDelay=true;
-                client.ReceiveBufferSize=4*1024*1024;
-                client.SendBufferSize=1024*1024;
-                await client.ConnectAsync(host,port);
-                stream=client.GetStream();
-                stream.ReadTimeout=15000;
-                stream.WriteTimeout=15000;
-            }
-
-            public async Task SendGetAsync(string remotePath,long offset,CancellationToken token)
-            {
-                await EnsureConnectedAsync();
-
-                string encoded=Convert.ToBase64String(Encoding.UTF8.GetBytes(remotePath??""));
-                string request=
-                    "FLASHDROP/1\n"+
-                    "PIN "+pin+"\n"+
-                    "MODE GET\n"+
-                    "PATH "+encoded+"\n"+
-                    "OFFSET "+offset+"\n\n";
-
-                byte[] hdr=Encoding.UTF8.GetBytes(request);
-                await stream.WriteAsync(hdr,0,hdr.Length,token);
-            }
-
-            public void Close()
-            {
-                try{if(stream!=null)stream.Dispose();}catch{}
-                try{if(client!=null)client.Close();}catch{}
-                stream=null;
-                client=null;
-            }
-
-            public void Dispose(){Close();}
+            var t = await CommandAsync("TYPE I", token);
+            Expect(t, 200);
         }
 
-        public MainForm()
+        public async Task<List<FtpItem>> ListAsync(string remotePath, CancellationToken token)
         {
-            Text = "FlashDrop Turbo v2.3 - by Shashank Patel";
-            StartPosition = FormStartPosition.CenterScreen;
-            MinimumSize = new Size(1000, 720);
-            Size = new Size(1180, 820);
-            BackColor = Bg;
-            Font = new Font("Segoe UI", 9.5f);
-            Icon = SystemIcons.Shield;
-            AutoScaleMode = AutoScaleMode.Dpi;
-            FormBorderStyle = FormBorderStyle.Sizable;
-            MaximizeBox = true;
-            BuildUi();
-            Shown += async (s, e) => await AutoDetectAsync();
+            EnsureConnected();
+
+            using (var data = await OpenPassiveAsync(token))
+            {
+                string path = NormalizeRemote(remotePath);
+                var start = await CommandAsync("MLSD " + path, token);
+                if (start.Code != 150 && start.Code != 125)
+                    throw new IOException("Cannot list " + path + ": " + start.Text);
+
+                string text;
+                using (var sr = new StreamReader(data.GetStream(), new UTF8Encoding(false), false, 64 * 1024))
+                {
+                    var readTask = sr.ReadToEndAsync();
+                    var winner = await Task.WhenAny(readTask, Task.Delay(20000, token));
+                    if (winner != readTask) throw new IOException("FTP folder listing timed out");
+                    text = await readTask;
+                }
+
+                data.Close();
+
+                var end = await ReadResponseAsync(10000, token);
+                if (end.Code != 226 && end.Code != 250)
+                    throw new IOException("FTP list did not finish: " + end.Text);
+
+                return ParseMlsd(text, path);
+            }
         }
 
-        void BuildUi()
+        public async Task DownloadAsync(
+            string remotePath,
+            string localPartPath,
+            long expectedSize,
+            long offset,
+            int bufferBytes,
+            CancellationToken token,
+            Action<int> onBytes)
         {
-            SuspendLayout();
+            EnsureConnected();
 
-            var outer = new TableLayoutPanel {
-                Dock = DockStyle.Fill,
-                ColumnCount = 1,
-                RowCount = 5,
-                BackColor = Bg,
-                Padding = new Padding(18, 14, 18, 14)
-            };
-            outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 108));
-            outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 136));
-            outer.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 122));
-            outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 96));
-            Controls.Add(outer);
+            using (var data = await OpenPassiveAsync(token))
+            {
+                if (offset > 0)
+                {
+                    var rest = await CommandAsync("REST " + offset.ToString(CultureInfo.InvariantCulture), token);
+                    Expect(rest, 350);
+                }
 
-            var hero = new HeroPanel { Dock = DockStyle.Fill, Margin = new Padding(0,0,0,10) };
-            outer.Controls.Add(hero,0,0);
+                string path = NormalizeRemote(remotePath);
+                var start = await CommandAsync("RETR " + path, token);
+                if (start.Code != 150 && start.Code != 125)
+                    throw new IOException("Cannot download " + path + ": " + start.Text);
 
-            var title = L("FLASHDROP TURBO", 23, Color.White, true);
-            title.Location = new Point(26, 16);
-            hero.Controls.Add(title);
+                data.ReceiveBufferSize = 4 * 1024 * 1024;
+                data.NoDelay = true;
 
-            var sub = L("High-speed sequential streaming over your 5 GHz hotspot", 11.5f, Color.FromArgb(236,244,255), false);
-            sub.Location = new Point(28, 52);
-            hero.Controls.Add(sub);
+                Directory.CreateDirectory(Path.GetDirectoryName(localPartPath));
 
-            var by = L("Designed & built by Shashank Patel", 9.5f, Color.FromArgb(225,249,242), true);
-            by.Location = new Point(28, 78);
-            hero.Controls.Add(by);
+                using (var fs = new FileStream(
+                    localPartPath,
+                    FileMode.OpenOrCreate,
+                    FileAccess.Write,
+                    FileShare.Read,
+                    bufferBytes,
+                    FileOptions.SequentialScan | FileOptions.Asynchronous))
+                {
+                    fs.Seek(offset, SeekOrigin.Begin);
+                    if (fs.Length != offset) fs.SetLength(offset);
 
-            var connectCard = Card();
-            connectCard.Margin = new Padding(0,0,0,10);
-            outer.Controls.Add(connectCard,0,1);
+                    byte[] buffer = new byte[bufferBytes];
+                    long got = offset;
+                    Stream input = data.GetStream();
 
-            var grid = new TableLayoutPanel {
-                Dock = DockStyle.Fill,
-                ColumnCount = 7,
-                RowCount = 3,
-                Padding = new Padding(14,10,14,10),
-                BackColor = Color.White
-            };
-            grid.RowStyles.Add(new RowStyle(SizeType.Absolute,24));
-            grid.RowStyles.Add(new RowStyle(SizeType.Absolute,42));
-            grid.RowStyles.Add(new RowStyle(SizeType.Percent,100));
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,38));
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,100));
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,105));
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,105));
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,88));
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,92));
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,20));
-            connectCard.Controls.Add(grid);
+                    while (got < expectedSize)
+                    {
+                        token.ThrowIfCancellationRequested();
 
-            grid.Controls.Add(L("PHONE HTTP ADDRESS",8.5f,Muted,true),0,0);
-            grid.Controls.Add(L("6-DIGIT PIN",8.5f,Muted,true),1,0);
-            grid.Controls.Add(L("WORKERS",8.5f,Muted,true),4,0);
-            grid.Controls.Add(L("BUFFER MB",8.5f,Muted,true),5,0);
+                        int want = (int)Math.Min(buffer.Length, expectedSize - got);
+                        int n = await ReadWithTimeoutAsync(input, buffer, 0, want, 20000, token);
 
-            addressBox = Box();
-            addressBox.Text = "http://192.168.1.1:8080";
-            grid.Controls.Add(addressBox,0,1);
+                        if (n <= 0) break;
 
-            pinBox = Box();
-            pinBox.MaxLength = 6;
-            pinBox.TextAlign = HorizontalAlignment.Center;
-            pinBox.Font = new Font("Segoe UI",11f,FontStyle.Bold);
-            pinBox.BackColor = Color.FromArgb(255,252,232);
-            grid.Controls.Add(pinBox,1,1);
+                        await fs.WriteAsync(buffer, 0, n, token);
+                        got += n;
+                        if (onBytes != null) onBytes(n);
+                    }
 
-            detectBtn = Btn("AUTO DETECT", Color.FromArgb(232,237,255), Blue);
-            detectBtn.Click += async (s,e) => await AutoDetectAsync();
-            grid.Controls.Add(detectBtn,2,1);
+                    if (got != expectedSize)
+                        throw new IOException("Incomplete FTP file: " + got + " / " + expectedSize);
+                }
 
-            connectBtn = Btn("CONNECT", Blue, Color.White);
-            connectBtn.Click += async (s,e) 
+                data.Close();
+
+                var end = await ReadResponseAsync(12000, token);
+                if (end.Code != 226 && end.Code != 250)
+                    throw new IOException("FTP transfer did not finish: " + end.Text);
+            }
+        }
+
+        async Task<TcpClient> OpenPassiveAsync(CancellationToken token)
+        {
+            var epsv = await CommandAsync("EPSV", token);
+
+            int dataPort = 0;
+
+            if (epsv.Code == 229)
+            {
+                int a = epsv.Text.IndexOf("(|||", StringComparison.Ordinal);
+                int b = a >= 0 ? epsv.Text.IndexOf("|)", a + 4, StringComparison.Ordinal) : -1;
+
+                if (a >= 0 && b > a)
+                {
+                    string p = epsv.Text.Substring(a + 4, b - (a + 4));
+                    int.TryParse(p, out dataPort);
+                }
+            }
+
+            if (dataPort <= 0)
+            {
+                var pasv = await CommandAsync("PASV", token);
+                Expect(pasv, 227);
+
+                int l = pasv.Text.IndexOf('(');
+                int r = pasv.Text.IndexOf(')', l + 1);
+                if (l < 0 || r <= l) throw new IOException("Invalid PASV response");
+
+                string[] v = pasv.Text.Substring(l + 1, r - l - 1).Split(',');
+                if (v.Length != 6) throw new IOException("Invalid PASV response");
+
+                int p1, p2;
+                if (!int.TryParse(v[4], out p1) || !int.TryParse(v[5], out p2))
+                    throw new IOException("Invalid PASV port");
+
+                dataPort = p1 * 256 + p2;
+            }
+
+            var data = new TcpClient();
+            data.NoDelay = true;
+            data.ReceiveBufferSize = 4 * 1024 * 1024;
+            await ConnectTcpAsync(data, host, dataPort, 6000, token);
+            return data;
+        }
+
+        async Task<FtpResponse> CommandAsync(string command, CancellationToken token)
+        {
+            EnsureConnected();
+            await writer.WriteLineAsync(command);
+            return await ReadResponseAsync(12000, token);
+        }
+
+        async Ta

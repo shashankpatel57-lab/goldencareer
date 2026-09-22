@@ -1,209 +1,202 @@
-"+s;
-                return s;
-            }
-        }
-        string Pin { get { return (pinBox.Text??"").Trim(); } }
+      var title = LabelX("FLASHDROP TURBO 3", 23, Color.White, true);
+            title.Location = new Point(26, 14);
+            hero.Controls.Add(title);
 
-        async Task AutoDetectAsync()
-        {
-            SetStatus("Looking for FlashDrop on your current Wi‑Fi/hotspot…", false);
-            detectBtn.Enabled=false;
-            try
+            var sub = LabelX("Stable FTP transfer engine • no HTTP APIs • no 404 errors", 11.5f, Color.FromArgb(239, 246, 255), false);
+            sub.Location = new Point(28, 51);
+            hero.Controls.Add(sub);
+
+            var by = LabelX("Designed & built by Shashank Patel", 9.5f, Color.FromArgb(226, 252, 245), true);
+            by.Location = new Point(28, 78);
+            hero.Controls.Add(by);
+
+            var connectCard = Card();
+            connectCard.Margin = new Padding(0, 0, 0, 10);
+            outer.Controls.Add(connectCard, 0, 1);
+
+            var g = new TableLayoutPanel
             {
-                var gateways = NetworkInterface.GetAllNetworkInterfaces()
-                    .Where(n=>n.OperationalStatus==OperationalStatus.Up)
-                    .SelectMany(n=>n.GetIPProperties().GatewayAddresses)
-                    .Select(g=>g.Address)
-                    .Where(a=>a.AddressFamily==AddressFamily.InterNetwork && !IPAddress.IsLoopback(a))
-                    .Select(a=>a.ToString()).Distinct().ToList();
-                foreach(var ip in gateways)
-                {
-                    for(int p=8080;p<=8090;p++)
-                    {
-                        var u="http://"+ip+":"+p;
-                        if(await LooksLikeFlashDrop(u))
-                        {
-                            addressBox.Text=u;
-                            connectionLabel.Text="Phone found";
-                            connectionLabel.ForeColor=Green;
-                            SetStatus("Phone detected. Enter the 6‑digit PIN shown in FlashDrop, then click Connect.", false);
-                            return;
-                        }
-                    }
-                }
-                connectionLabel.Text="Not detected"; connectionLabel.ForeColor=Color.FromArgb(180,90,35);
-                SetStatus("Auto-detect did not find the phone. Enter the HTTP address shown in the Android app.", true);
-            }
-            catch(Exception ex){ SetStatus("Detection error: "+ex.Message,true); }
-            finally{ detectBtn.Enabled=true; }
-        }
+                Dock = DockStyle.Fill,
+                ColumnCount = 6,
+                RowCount = 3,
+                Padding = new Padding(14, 10, 14, 8),
+                BackColor = Color.White
+            };
+            g.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
+            g.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
+            g.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            g.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            g.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 118));
+            g.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 105));
+            g.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 82));
+            g.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 92));
+            g.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 155));
+            connectCard.Controls.Add(g);
 
-        async Task<bool> LooksLikeFlashDrop(string u)
-        {
-            return await Task.Run(()=>{
-                try
-                {
-                    var req=(HttpWebRequest)WebRequest.Create(u+"/"); req.Method="GET"; req.Timeout=450; req.ReadWriteTimeout=450; req.Proxy=null;
-                    using(var res=(HttpWebResponse)req.GetResponse()) using(var sr=new StreamReader(res.GetResponseStream()))
-                    {
-                         char[] b=new char[2048]; int n=sr.Read(b,0,b.Length); var s=new string(b,0,Math.Max(0,n));
-                        return s.IndexOf("FLASHDROP",StringComparison.OrdinalIgnoreCase)>=0;
-                    }
-                }catch{return false;}
-            });
-        }
+            g.Controls.Add(LabelX("PHONE FTP ADDRESS", 8.5f, Muted, true), 0, 0);
+            g.Controls.Add(LabelX("WORKERS", 8.5f, Muted, true), 3, 0);
+            g.Controls.Add(LabelX("BUFFER MB", 8.5f, Muted, true), 4, 0);
 
-        async Task LoadFolderAsync(string path)
-        {
-            if(Pin.Length!=6){SetStatus("Enter the 6-digit PIN shown on the phone.",true); return;}
-            ToggleConnect(false);
-            try
+            addressBox = Box();
+            addressBox.Text = "";
+            g.Controls.Add(addressBox, 0, 1);
+
+            detectBtn = Btn("AUTO DETECT", Color.FromArgb(235, 237, 255), Blue);
+            detectBtn.Click += async (s, e) => await AutoDetectAsync();
+            g.Controls.Add(detectBtn, 1, 1);
+
+            connectBtn = Btn("CONNECT", Blue, Color.White);
+            connectBtn.Click += async (s, e) => await ConnectAndLoadAsync();
+            g.Controls.Add(connectBtn, 2, 1);
+
+            workersBox = Num(1, 8, 4);
+            g.Controls.Add(workersBox, 3, 1);
+
+            bufferBox = Num(1, 8, 2);
+            g.Controls.Add(bufferBox, 4, 1);
+
+            connectionLabel = LabelX("Waiting for phone...", 9.5f, Muted, true);
+            connectionLabel.Dock = DockStyle.Fill;
+            connectionLabel.TextAlign = ContentAlignment.MiddleLeft;
+            g.Controls.Add(connectionLabel, 5, 1);
+
+            var hint = LabelX("No PIN is required in Turbo 3. The phone FTP server is read-only and must be manually started.", 9.1f, Color.FromArgb(76, 87, 111), false);
+            hint.Dock = DockStyle.Fill;
+            hint.TextAlign = ContentAlignment.MiddleLeft;
+            g.SetColumnSpan(hint, 6);
+            g.Controls.Add(hint, 0, 2);
+
+            var browserCard = Card();
+            browserCard.Margin = new Padding(0, 0, 0, 10);
+            outer.Controls.Add(browserCard, 0, 2);
+
+            var browser = new TableLayoutPanel
             {
-                var r=await GetListAsync(path,CancellationToken.None);
-                currentPath=r.path??path??"";
-                pathLabel.Text=string.IsNullOrEmpty(currentPath)?"Internal storage":"Internal storage / "+currentPath;
-                remoteList.Items.Clear();
-                foreach(var x in (r.items??new PhoneItem[0]))
-                {
-                    var li=new ListViewItem(x.name); li.Tag=x;
-                    li.SubItems.Add(x.dir?"Folder":"File");
-                    li.SubItems.Add(x.dir?"—":FormatBytes(x.size));
-                    li.SubItems.Add(x.modified>0?DateTimeOffset.FromUnixTimeMilliseconds(x.modified).LocalDateTime.ToString("g"):"—");
-                    if(x.dir){li.ForeColor=Color.FromArgb(32,74,156); li.Font=new Font(remoteList.Font,FontStyle.Bold);}
-                    remoteList.Items.Add(li);
-                }
-                connectionLabel.Text="Connected"; connectionLabel.ForeColor=Green;
-                SetStatus("Connected. Double-click a folder to open it; START TURBO COPY downloads the current folder tree.",false);
-            }
-            catch(WebException ex)
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 2,
+                BackColor = Color.White
+            };
+            browser.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
+            browser.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            browserCard.Controls.Add(browser);
+
+            var nav = new TableLayoutPanel
             {
-                connectionLabel.Text="Connection failed"; connectionLabel.ForeColor=Color.Firebrick;
-                SetStatus(WebMessage(ex),true);
-            }
-            catch(Exception ex){SetStatus(ex.Message,true);} finally{ToggleConnect(true);}
-        }
+                Dock = DockStyle.Fill,
+                ColumnCount = 4,
+                RowCount = 1,
+                Padding = new Padding(12, 8, 12, 6),
+                BackColor = Color.FromArgb(249, 250, 253)
+            };
+            nav.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 80));
+            nav.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100));
+            nav.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            nav.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 175));
+            browser.Controls.Add(nav, 0, 0);
 
-        async Task<ListResponse> GetListAsync(string path, CancellationToken token)
-        {
-            var url=BaseUrl+"/api/list?pin="+Uri.EscapeDataString(Pin)+"&path="+Uri.EscapeDataString(path??"");
-            string txt=await GetStringAsync(url,token);
-            var r=json.Deserialize<ListResponse>(txt);
-            if(r==null) throw new Exception("Invalid response from phone");
-            if(!string.IsNullOrEmpty(r.error)) throw new Exception(r.error);
-            return r;
-        }
+            upBtn = Btn("UP", Color.FromArgb(240, 244, 250), Ink);
+            upBtn.Click += async (s, e) => await UpAsync();
+            nav.Controls.Add(upBtn, 0, 0);
 
-        async Task<string> GetStringAsync(string url, CancellationToken token)
-        {
-            return await Task.Run(()=>{
-                var req=(HttpWebRequest)WebRequest.Create(url); req.Method="GET"; req.Timeout=10000; req.ReadWriteTimeout=10000; req.Proxy=null; req.KeepAlive=true;
-                using(token.Register(()=>{try{req.Abort();}catch{}}))
-                using(var res=(HttpWebResponse)req.GetResponse()) using(var sr=new StreamReader(res.GetResponseStream(),Encoding.UTF8)) return sr.ReadToEnd();
-            },token);
-        }
+            refreshBtn = Btn("REFRESH", Color.FromArgb(240, 244, 250), Ink);
+            refreshBtn.Click += async (s, e) => await LoadFolderAsync(currentPath);
+            nav.Controls.Add(refreshBtn, 1, 0);
 
-        async Task OpenSelectedAsync()
-        {
-            if(remoteList.SelectedItems.Count==0)return;
-            var x=remoteList.SelectedItems[0].Tag as PhoneItem;
-            if(x!=null && x.dir) await LoadFolderAsync(x.path);
-        }
+            pathLabel = LabelX("Internal storage", 10, Ink, true);
+            pathLabel.Dock = DockStyle.Fill;
+            pathLabel.TextAlign = ContentAlignment.MiddleLeft;
+            pathLabel.AutoEllipsis = true;
+            nav.Controls.Add(pathLabel, 2, 0);
 
-        async Task UpAsync()
-        {
-            if(string.IsNullOrEmpty(currentPath)){await LoadFolderAsync("");return;}
-            var p=currentPath.Replace('\\','/'); int i=p.LastIndexOf('/'); p=i<0?"":p.Substring(0,i); await LoadFolderAsync(p);
-        }
+            var browseHint = LabelX("Double-click folder to open", 8.8f, Muted, false);
+            browseHint.Dock = DockStyle.Fill;
+            browseHint.TextAlign = ContentAlignment.MiddleRight;
+            nav.Controls.Add(browseHint, 3, 0);
 
-        void ChooseFolder()
-        {
-            using(var f=new FolderBrowserDialog { Description="Choose where FlashDrop should save the phone folder", ShowNewFolderButton=true, SelectedPath=Directory.Exists(localBox.Text)?localBox.Text:"" })
-                if(f.ShowDialog(this)==DialogResult.OK)localBox.Text=f.SelectedPath;
-        }
-
-        void OpenDestination()
-        {
-            try{Directory.CreateDirectory(localBox.Text);Process.Start("explorer.exe",localBox.Text);}catch(Exception ex){SetStatus(ex.Message,true);}
-        }
-
-        async Task StartTransferAsync()
-        {
-            if(cts!=null)return;
-            if(Pin.Length!=6){SetStatus("Enter the PIN and connect first.",true);return;}
-            if(string.IsNullOrWhiteSpace(localBox.Text)){SetStatus("Choose a destination folder on the PC.",true);return;}
-
-            cts=new CancellationTokenSource();
-            var token=cts.Token;
-            startBtn.Enabled=false;
-            cancelBtn.Enabled=true;
-            ToggleConnect(false);
-            completedBytes=0;
-            totalBytes=0;
-            progress.Value=0;
-            transferWatch=null;
-            speedTimer.Stop();
-
-            try
+            remoteList = new ListView
             {
-                double link=0;
-                bool benchmarkOk=false;
+                Dock = DockStyle.Fill,
+                View = View.Details,
+                FullRowSelect = true,
+                HideSelection = false,
+                BorderStyle = BorderStyle.None,
+                BackColor = Color.White,
+                Font = new Font("Segoe UI", 9.5f)
+            };
+            remoteList.Columns.Add("Name", 520);
+            remoteList.Columns.Add("Type", 105);
+            remoteList.Columns.Add("Size", 125);
+            remoteList.Columns.Add("Modified", 180);
+            remoteList.DoubleClick += async (s, e) => await OpenSelectedAsync();
+            browser.Controls.Add(remoteList, 0, 1);
 
-                SetStatus("Checking transfer path…",false);
+            var destCard = Card();
+            destCard.Margin = new Padding(0, 0, 0, 10);
+            outer.Controls.Add(destCard, 0, 3);
 
-                try
-                {
-                    link=await RunHttpBenchmarkAsync(16L*1024L*1024L,token);
-                    benchmarkOk=true;
-                    SetStatus("LAN test: "+link.ToString("0.0")+" MB/s. Scanning selected phone folder…",false);
-                }
-                catch(WebException ex)
-                {
-                    var response=ex.Response as HttpWebResponse;
+            var d = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 5,
+                RowCount = 2,
+                Padding = new Padding(14, 10, 14, 10),
+                BackColor = Color.White
+            };
+            d.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
+            d.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            d.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            d.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
+            d.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
+            d.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 190));
+            d.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 115));
+            destCard.Controls.Add(d);
 
-                    if(response!=null && response.StatusCode==HttpStatusCode.NotFound)
-                    {
-                        SetStatus("Older phone server detected. Speed test skipped; continuing with compatible transfer mode…",false);
-                    }
-                    else
-                    {
-                        SetStatus("Speed test unavailable. Continuing with compatible transfer mode…",false);
-                    }
-                }
-                catch(Exception)
-                {
-                    SetStatus("Speed test skipped. Continuing with compatible transfer mode…",false);
-                }
+            d.Controls.Add(LabelX("DESTINATION ON THIS PC", 9, Muted, true), 0, 0);
+            var note = LabelX("4 workers / 2 MB buffer recommended for OnePlus", 8.8f, Muted, false);
+            note.Dock = DockStyle.Fill;
+            note.TextAlign = ContentAlignment.MiddleRight;
+            d.SetColumnSpan(note, 4);
+            d.Controls.Add(note, 1, 0);
 
-                var remoteRoot=currentPath??"";
-                string rootName=string.IsNullOrEmpty(remoteRoot)?"PhoneBackup":Sanitize(RemoteLeaf(remoteRoot));
-                string destination=Path.Combine(localBox.Text,rootName);
-                Directory.CreateDirectory(destination);
+            localBox = Box();
+            localBox.Text = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "FlashDrop");
+            d.Controls.Add(localBox, 0, 1);
 
-                var files=new List<RemoteFile>();
-                await BuildManifestAsync(remoteRoot,"",destination,files,token);
-                totalBytes=files.Sum(f=>f.Size);
-                totalLabel.Text=files.Count+" files • "+FormatBytes(totalBytes);
+            browseBtn = Btn("CHOOSE FOLDER", Color.FromArgb(229, 248, 241), Green);
+            browseBtn.Click += (s, e) => ChooseFolder();
+            d.Controls.Add(browseBtn, 1, 1);
 
-                if(files.Count==0)
-                {
-                    SetStatus("No readable files found in this folder.",true);
-                    return;
-                }
+            openBtn = Btn("OPEN FOLDER", Color.FromArgb(240, 244, 250), Ink);
+            openBtn.Click += (s, e) => OpenDestination();
+            d.Controls.Add(openBtn, 2, 1);
 
-                long alreadyDone=0;
-                var pending=new List<RemoteFile>();
+            startBtn = Btn("START TURBO COPY", Green, Color.White);
+            startBtn.Font = new Font("Segoe UI", 10f, FontStyle.Bold);
+            startBtn.Click += async (s, e) => await StartTransferAsync();
+            d.Controls.Add(startBtn, 3, 1);
 
-                foreach(var f in files)
-                {
-                    token.ThrowIfCancellationRequested();
-                    Directory.CreateDirectory(Path.GetDirectoryName(f.FinalPath));
+            cancelBtn = Btn("CANCEL", Color.FromArgb(255, 236, 238), Color.FromArgb(185, 45, 55));
+            cancelBtn.Enabled = false;
+            cancelBtn.Click += (s, e) => { if (transferCts != null) transferCts.Cancel(); };
+            d.Controls.Add(cancelBtn, 4, 1);
 
-                    if(File.Exists(f.FinalPath) && new FileInfo(f.FinalPath).Length==f.Size)
-                    {
-                        alreadyDone+=f.Size;
-                        continue;
-                    }
+            var bottom = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 3,
+                RowCount = 2,
+                Padding = new Padding(2, 8, 2, 0),
+                BackColor = Bg
+            };
+            bottom.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
+            bottom.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
+            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 235));
+            outer.Controls.Add(bottom, 0, 4);
 
-                    if(f.Size==0)
-                    {
-                        File.WriteAllBytes(f.FinalPath,new byt
+            progress = new ProgressBar
+            {
+                Dock = DockStyle.Fill,
+                Style = ProgressBarStyle.Continuous,

@@ -1,270 +1,284 @@
-                      await DownloadSingleHttpFileAsync(file,token);
-                        ok=true;
-                    }
-                    catch(Exception ex)
-                    {
-                        last=ex;
-                        Thread.Sleep(200*attempt);
-                    }
-                }
 
-                if(!ok)
-                    errors.Enqueue(file.RemotePath+" : "+(last==null?"HTTP fallback failed":last.Message));
+            speedSampleBytes = nowBytes;
+            speedSampleAt = now;
+
+            speedLabel.Text = smoothedMbps.ToString("0.0") + " MB/s";
+
+            if (totalBytes > 0)
+            {
+                progress.Value = (int)Math.Max(0, Math.Min(1000, nowBytes * 1000d / totalBytes));
+                double remain = Math.Max(0, totalBytes - nowBytes);
+                double eta = smoothedMbps > 0.2 ? remain / 1048576d / smoothedMbps : 0;
+
+                totalLabel.Text =
+                    FormatBytes(nowBytes) + " / " + FormatBytes(totalBytes) +
+                    (eta > 0 ? " • ETA " + FormatDuration(eta) : "");
             }
         }
 
-        async Task DownloadSingleHttpFileAsync(
-            RemoteFile file,
-            CancellationToken token)
+        async Task<FtpEndpoint> ResolveEndpointAsync(string input)
         {
-            Exception first=null;
+            string host = ExtractHost(input);
+
+            if (!string.IsNullOrEmpty(host))
+            {
+                int explicitPort = ExtractFtpPort(input);
+
+                if (explicitPort > 0 && await ProbeFtpAsync(host, explicitPort, 900))
+                    return new FtpEndpoint { Host = host, Port = explicitPort };
+
+                for (int p = 2121; p <= 2130; p++)
+                    if (await ProbeFtpAsync(host, p, 700))
+                        return new FtpEndpoint { Host = host, Port = p };
+            }
+
+            return null;
+        }
+
+        static string ExtractHost(string input)
+        {
+            input = (input ?? "").Trim();
+            if (input.Length == 0) return "";
 
             try
             {
-                await DownloadSingleHttpFileFromRouteAsync(
-                    file,
-                    "/api/file",
-                    token);
-                return;
-            }
-            catch(WebException ex)
-            {
-                first=ex;
-                var response=ex.Response as HttpWebResponse;
+                if (input.IndexOf("://", StringComparison.Ordinal) < 0)
+                    input = "ftp://" + input;
 
-                if(response!=null && response.StatusCode!=HttpStatusCode.NotFound)
-                    throw;
+                var u = new Uri(input);
+                return u.Host;
             }
-            catch(Exception ex)
-            {
-                first=ex;
-            }
+            catch { return ""; }
+        }
 
-            // FlashDrop v1.x Android server generations use /download.
+        static int ExtractFtpPort(string input)
+        {
+            input = (input ?? "").Trim();
+
             try
             {
-                SetStatus("Legacy FlashDrop server detected — using /download compatibility mode.",false);
-                await DownloadSingleHttpFileFromRouteAsync(
-                    file,
-                    "/download",
-                    token);
+                if (!input.StartsWith("ftp://", StringComparison.OrdinalIgnoreCase))
+                    return 0;
+
+                var u = new Uri(input);
+                return u.IsDefaultPort ? 21 : u.Port;
             }
-            catch(Exception legacy)
-            {
-                throw new IOException(
-                    "Both new and legacy file routes failed. New route: "+
-                    (first==null?"unknown":first.Message)+
-                    " | Legacy route: "+legacy.Message,
-                    legacy);
-            }
+            catch { return 0; }
         }
 
-        async Task DownloadSingleHttpFileFromRouteAsync(
-            RemoteFile file,
-            string route,
-            CancellationToken token)
+        static async Task<bool> ProbeFtpAsync(string host, int port, int timeoutMs)
         {
-            long offset=SafePartialLength(file);
-            string url=BaseUrl+route+
-                "?pin="+Uri.EscapeDataString(Pin)+
-                "&path="+Uri.EscapeDataString(file.RemotePath??"");
-
-            var req=(HttpWebRequest)WebRequest.Create(url);
-            req.Method="GET";
-            req.Proxy=null;
-            req.KeepAlive=true;
-            req.Timeout=30000;
-            req.ReadWriteTimeout=30000;
-
-            if(offset>0)
-                req.AddRange(offset);
-
-            using(token.Register(()=>{try{req.Abort();}catch{}}))
-            using(var res=(HttpWebResponse)await req.GetResponseAsync())
-            using(var input=res.GetResponseStream())
+            try
             {
-                int bufferBytes=(int)chunkBox.Value*1024*1024;
-                bufferBytes=Math.Max(512*1024,Math.Min(8*1024*1024,bufferBytes));
-                byte[] buf=new byte[bufferBytes];
-
-                Directory.CreateDirectory(Path.GetDirectoryName(file.FinalPath));
-
-                using(var fs=new FileStream(
-                    file.PartPath,
-                    FileMode.OpenOrCreate,
-                    FileAccess.Write,
-                    FileShare.Read,
-                    bufferBytes,
-                    FileOptions.SequentialScan | FileOptions.Asynchronous))
+                using (var c = new TcpClient())
                 {
-                    fs.Seek(offset,SeekOrigin.Begin);
-                    if(fs.Length!=offset)fs.SetLength(offset);
+                    var connect = c.ConnectAsync(host, port);
+                    var winner = await Task.WhenAny(connect, Task.Delay(timeoutMs));
+                    if (winner != connect) return false;
+                    await connect;
 
-                    long got=offset;
-
-                    while(got<file.Size)
+                    using (var r = new StreamReader(c.GetStream(), new UTF8Encoding(false), false, 1024))
                     {
-                        token.ThrowIfCancellationRequested();
-
-                        int n=await ReadWithTimeoutAsync(
-                            input,
-                            buf,
-                            0,
-                            (int)Math.Min(buf.Length,file.Size-got),
-                            token,
-                            20000);
-
-                        if(n<=0)break;
-
-                        await fs.WriteAsync(buf,0,n,token);
-                        got+=n;
-                        Interlocked.Add(ref completedBytes,n);
+                        var lineTask = r.ReadLineAsync();
+                        var readWinner = await Task.WhenAny(lineTask, Task.Delay(timeoutMs));
+                        if (readWinner != lineTask) return false;
+                        string line = await lineTask;
+                        return line != null && line.StartsWith("220", StringComparison.Ordinal);
                     }
-
-                    if(got!=file.Size)
-                        throw new IOException(
-                            route+" incomplete "+got+"/"+file.Size);
                 }
             }
-
-            FinalizePartFile(file);
+            catch { return false; }
         }
 
-        void FinalizePartFile(RemoteFile file)
+        void ChooseFolder()
         {
-            long localSize=File.Exists(file.PartPath)
-                ? new FileInfo(file.PartPath).Length
-                : 0;
-
-            if(localSize!=file.Size)
-                throw new IOException(
-                    "Incomplete local file "+localSize+"/"+file.Size+
-                    " for "+file.RemotePath);
-
-            if(File.Exists(file.FinalPath))
-                File.Delete(file.FinalPath);
-
-            File.Move(file.PartPath,file.FinalPath);
-
-            if(file.Modified>0)
+            using (var f = new FolderBrowserDialog
             {
-                try
-                {
-                    File.SetLastWriteTime(
-                        file.FinalPath,
-                        DateTimeOffset.FromUnixTimeMilliseconds(file.Modified).LocalDateTime);
-                }
-                catch{}
+                Description = "Choose where FlashDrop should save the phone folder",
+                ShowNewFolderButton = true,
+                SelectedPath = Directory.Exists(localBox.Text) ? localBox.Text : ""
+            })
+            {
+                if (f.ShowDialog(this) == DialogResult.OK)
+                    localBox.Text = f.SelectedPath;
             }
         }
 
-        async Task<string> ReadAsciiLineWithTimeoutAsync(
-            Stream input,
-            CancellationToken token,
-            int timeoutMs)
+        void OpenDestination()
         {
-            var bytes=new List<byte>(128);
-            var one=new byte[1];
-
-            while(bytes.Count<8192)
+            try
             {
-                int n=await ReadWithTimeoutAsync(input,one,0,1,token,timeoutMs);
-
-                if(n<=0)break;
-                if(one[0]==10)break;
-                if(one[0]!=13)bytes.Add(one[0]);
+                Directory.CreateDirectory(localBox.Text);
+                Process.Start("explorer.exe", localBox.Text);
             }
-
-            return Encoding.UTF8.GetString(bytes.ToArray());
-        }
-
-        async Task<int> ReadWithTimeoutAsync(
-            Stream input,
-            byte[] buffer,
-            int offset,
-            int count,
-            CancellationToken token,
-            int timeoutMs)
-        {
-            var readTask=input.ReadAsync(buffer,offset,count,token);
-            var timeoutTask=Task.Delay(timeoutMs,token);
-            var finished=await Task.WhenAny(readTask,timeoutTask);
-
-            if(finished!=readTask)
-            {
-                token.ThrowIfCancellationRequested();
-                throw new IOException(
-                    "No data received for "+(timeoutMs/1000)+
-                    " seconds; reconnecting and resuming.");
-            }
-
-            return await readTask;
-        }
-
-        void UpdateSpeed()
-        {
-            if(transferWatch==null)return;
-
-            long done=Interlocked.Read(ref completedBytes);
-            DateTime now=DateTime.UtcNow;
-            double dt=Math.Max(.001,(now-speedSampleAt).TotalSeconds);
-            long delta=Math.Max(0,done-speedSampleBytes);
-            double instant=delta/1048576d/dt;
-
-            if(smoothedMbps<=0)smoothedMbps=instant;
-            else smoothedMbps=(smoothedMbps*0.60)+(instant*0.40);
-
-            speedSampleBytes=done;
-            speedSampleAt=now;
-
-            speedLabel.Text=smoothedMbps.ToString("0.0")+" MB/s";
-
-            if(totalBytes>0)
-            {
-                int v=(int)Math.Max(0,Math.Min(1000,done*1000d/totalBytes));
-                progress.Value=v;
-
-                double remaining=Math.Max(0,totalBytes-done);
-                double eta=smoothedMbps>0.1?remaining/1048576d/smoothedMbps:0;
-                totalLabel.Text=FormatBytes(done)+" / "+FormatBytes(totalBytes)
-                    +(eta>0?" • ETA "+TimeSpan.FromSeconds(eta).ToString(eta>=3600?@"h\:mm\:ss":@"m\:ss"):"");
-            }
+            catch (Exception ex) { SetStatus(ex.Message, true); }
         }
 
         void ToggleConnect(bool enabled)
         {
-            detectBtn.Enabled=enabled; connectBtn.Enabled=enabled; upBtn.Enabled=enabled; refreshBtn.Enabled=enabled;
+            if (InvokeRequired) { BeginInvoke(new Action<bool>(ToggleConnect), enabled); return; }
+            detectBtn.Enabled = enabled;
+            connectBtn.Enabled = enabled;
+            upBtn.Enabled = enabled;
+            refreshBtn.Enabled = enabled;
         }
 
-        string WebMessage(WebException ex)
+        void SetStatus(string text, bool error)
         {
-            try
+            if (InvokeRequired)
             {
-                var r=ex.Response as HttpWebResponse;
-                if(r!=null && r.StatusCode==HttpStatusCode.Forbidden)return "Wrong PIN. Check the FlashDrop app on the phone.";
-            }catch{}
-            return "Cannot reach phone: "+ex.Message;
+                BeginInvoke(new Action<string, bool>(SetStatus), text, error);
+                return;
+            }
+
+            statusLabel.Text = text;
+            statusLabel.ForeColor = error ? Color.Firebrick : Muted;
         }
-        void SetStatus(string s,bool error)
+
+        Panel Card()
         {
-            if(InvokeRequired){BeginInvoke((Action)(()=>SetStatus(s,error)));return;}
-            statusLabel.Text=s; statusLabel.ForeColor=error?Color.FromArgb(185,55,55):Muted;
+            return new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = Color.White,
+                Padding = new Padding(1),
+                Margin = new Padding(0)
+            };
         }
+
+        Label LabelX(string text, float size, Color color, bool bold)
+        {
+            return new Label
+            {
+                Text = text,
+                ForeColor = color,
+                Font = new Font("Segoe UI", size, bold ? FontStyle.Bold : FontStyle.Regular),
+                AutoSize = true,
+                BackColor = Color.Transparent
+            };
+        }
+
+        TextBox Box()
+        {
+            return new TextBox
+            {
+                Dock = DockStyle.Fill,
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Segoe UI", 10f),
+                Margin = new Padding(0, 4, 8, 3),
+                BackColor = Color.White,
+                ForeColor = Ink
+            };
+        }
+
+        Button Btn(string text, Color bg, Color fg)
+        {
+            var b = new Button
+            {
+                Text = text,
+                BackColor = bg,
+                ForeColor = fg,
+                FlatStyle = FlatStyle.Flat,
+                Dock = DockStyle.Fill,
+                Margin = new Padding(4, 3, 4, 3),
+                Font = new Font("Segoe UI", 9.2f, FontStyle.Bold),
+                Cursor = Cursors.Hand,
+                UseVisualStyleBackColor = false
+            };
+            b.FlatAppearance.BorderSize = 0;
+            return b;
+        }
+
+        NumericUpDown Num(decimal min, decimal max, decimal value)
+        {
+            return new NumericUpDown
+            {
+                Minimum = min,
+                Maximum = max,
+                Value = value,
+                Dock = DockStyle.Fill,
+                Margin = new Padding(0, 4, 8, 3),
+                Font = new Font("Segoe UI", 10f),
+                BackColor = Color.White,
+                ForeColor = Ink
+            };
+        }
+
+        static string NormalizeRemote(string p)
+        {
+            p = (p ?? "/").Replace('\\', '/');
+            if (!p.StartsWith("/")) p = "/" + p;
+            while (p.Contains("//")) p = p.Replace("//", "/");
+            return p;
+        }
+
         static string RemoteLeaf(string p)
         {
-            var x=(p??"").TrimEnd('/').Replace('\\','/'); int i=x.LastIndexOf('/'); return i>=0?x.Substring(i+1):x;
+            p = NormalizeRemote(p).TrimEnd('/');
+            int i = p.LastIndexOf('/');
+            return i >= 0 ? p.Substring(i + 1) : p;
         }
-        static string Sanitize(string name)
+
+        static string Sanitize(string s)
         {
-            if(string.IsNullOrWhiteSpace(name))return "unnamed";
-            char[] bad=Path.GetInvalidFileNameChars(); var a=name.Select(c=>bad.Contains(c)?'_':c).ToArray(); string s=new string(a).Trim().TrimEnd('.');
-            if(string.IsNullOrEmpty(s))s="unnamed";
-            string u=s.ToUpperInvariant(); string[] r={"CON","PRN","AUX","NUL","COM1","COM2","COM3","COM4","COM5","COM6","COM7","COM8","COM9","LPT1","LPT2","LPT3","LPT4","LPT5","LPT6","LPT7","LPT8","LPT9"};
-            if(r.Contains(u))s+="_"; return s;
+            if (string.IsNullOrEmpty(s)) return "unnamed";
+            foreach (char c in Path.GetInvalidFileNameChars()) s = s.Replace(c, '_');
+            s = s.Trim().TrimEnd('.');
+            return string.IsNullOrEmpty(s) ? "unnamed" : s;
         }
+
+        static string CompactComponent(string name, int max)
+        {
+            name = Sanitize(name);
+            if (name.Length <= max) return name;
+
+            string ext = "";
+            string stem = name;
+
+            try
+            {
+                ext = Path.GetExtension(name);
+                if (ext.Length > 12) ext = "";
+                if (!string.IsNullOrEmpty(ext)) stem = name.Substring(0, name.Length - ext.Length);
+            }
+            catch { ext = ""; stem = name; }
+
+            string h = Hash8(name);
+            int keep = Math.Max(6, max - h.Length - ext.Length - 2);
+            if (stem.Length > keep) stem = stem.Substring(0, keep);
+
+            return stem + "_" + h + ext;
+        }
+
+        static string Hash8(string s)
+        {
+            unchecked
+            {
+                uint h = 2166136261;
+                foreach (char c in (s ?? ""))
+                {
+                    h ^= c;
+                    h *= 16777619;
+                }
+                return h.ToString("x8");
+            }
+        }
+
         static string FormatBytes(long b)
         {
-            string[] u={"B","KB","MB","GB","TB"}; double v=b; int i=0; while(v>=1024&&i<u.Length-1){v/=1024;i++;} return (i==0?v.ToString("0"):v.ToString(v<10?"0.0":"0"))+" "+u[i];
+            if (b < 1024) return b + " B";
+            double v = b / 1024d;
+            if (v < 1024) return v.ToString("0.0") + " KB";
+            v /= 1024d;
+            if (v < 1024) return v.ToString("0.0") + " MB";
+            return (v / 1024d).ToString("0.00") + " GB";
+        }
+
+        static string FormatDuration(double seconds)
+        {
+            var t = TimeSpan.FromSeconds(Math.Max(0, seconds));
+            if (t.TotalHours >= 1) return ((int)t.TotalHours).ToString() + ":" + t.Minutes.ToString("00") + ":" + t.Seconds.ToString("00");
+            return t.Minutes.ToString() + ":" + t.Seconds.ToString("00");
         }
     }
 }

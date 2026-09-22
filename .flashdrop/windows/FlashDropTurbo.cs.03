@@ -1,282 +1,249 @@
-e[0]);
-                        continue;
-                    }
 
-                    long partial=0;
+                Maximum = 1000,
+                Margin = new Padding(0, 3, 0, 5)
+            };
+            bottom.SetColumnSpan(progress, 3);
+            bottom.Controls.Add(progress, 0, 0);
+
+            statusLabel = LabelX("Ready. Turbo 3 uses only the proven FTP path.", 9.5f, Muted, false);
+            statusLabel.Dock = DockStyle.Fill;
+            statusLabel.TextAlign = ContentAlignment.MiddleLeft;
+            statusLabel.AutoEllipsis = true;
+            bottom.Controls.Add(statusLabel, 0, 1);
+
+            speedLabel = LabelX("0.0 MB/s", 12, Blue, true);
+            speedLabel.Dock = DockStyle.Fill;
+            speedLabel.TextAlign = ContentAlignment.MiddleRight;
+            bottom.Controls.Add(speedLabel, 1, 1);
+
+            totalLabel = LabelX("Waiting to transfer", 9, Muted, false);
+            totalLabel.Dock = DockStyle.Fill;
+            totalLabel.TextAlign = ContentAlignment.MiddleRight;
+            totalLabel.AutoEllipsis = true;
+            bottom.Controls.Add(totalLabel, 2, 1);
+
+            speedTimer = new System.Windows.Forms.Timer { Interval = 500 };
+            speedTimer.Tick += (s, e) => UpdateSpeed();
+        }
+
+        async Task AutoDetectAsync()
+        {
+            detectBtn.Enabled = false;
+            SetStatus("Detecting FlashDrop FTP on the hotspot...", false);
+
+            try
+            {
+                var hosts = new List<string>();
+
+                foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+                {
+                    if (ni.OperationalStatus != OperationalStatus.Up) continue;
 
                     try
                     {
-                        if(File.Exists(f.PartPath))
+                        foreach (var g in ni.GetIPProperties().GatewayAddresses)
                         {
-                            partial=new FileInfo(f.PartPath).Length;
-
-                            if(partial<0 || partial>f.Size)
+                            if (g.Address.AddressFamily == AddressFamily.InterNetwork)
                             {
-                                File.Delete(f.PartPath);
-                                partial=0;
+                                string h = g.Address.ToString();
+                                if (!hosts.Contains(h)) hosts.Add(h);
                             }
                         }
                     }
-                    catch
-                    {
-                        partial=0;
-                    }
-
-                    alreadyDone+=partial;
-                    pending.Add(f);
+                    catch { }
                 }
 
-                Interlocked.Exchange(ref completedBytes,alreadyDone);
+                string typed = ExtractHost(addressBox.Text);
+                if (!string.IsNullOrEmpty(typed) && !hosts.Contains(typed)) hosts.Insert(0, typed);
 
-                if(pending.Count==0)
+                string[] common = { "192.168.43.1", "192.168.1.1", "192.168.80.1", "192.168.137.1", "172.20.10.1" };
+                foreach (var h in common) if (!hosts.Contains(h)) hosts.Add(h);
+
+                FtpEndpoint found = null;
+
+                foreach (string host in hosts)
                 {
-                    SetStatus("Everything is already present at the destination.",false);
-                    progress.Value=1000;
+                    for (int port = 2121; port <= 2130; port++)
+                    {
+                        if (await ProbeFtpAsync(host, port, 500))
+                        {
+                            found = new FtpEndpoint { Host = host, Port = port };
+                            break;
+                        }
+                    }
+                    if (found != null) break;
+                }
+
+                if (found == null)
+                {
+                    SetStatus("Could not auto-detect. Copy the FTP address shown in the Android app and paste it above.", true);
                     return;
                 }
 
-                int laneCount=Math.Max(1,Math.Min((int)workersBox.Value,pending.Count));
-                var lanes=new List<List<RemoteFile>>();
-                var laneLoads=new long[laneCount];
-
-                for(int i=0;i<laneCount;i++)lanes.Add(new List<RemoteFile>());
-
-                foreach(var f in pending.OrderByDescending(x=>RemainingBytes(x)))
-                {
-                    int best=0;
-                    for(int i=1;i<laneCount;i++)
-                        if(laneLoads[i]<laneLoads[best])best=i;
-
-                    lanes[best].Add(f);
-                    laneLoads[best]+=RemainingBytes(f);
-                }
-
-                transferWatch=Stopwatch.StartNew();
-                speedSampleBytes=Interlocked.Read(ref completedBytes);
-                speedSampleAt=DateTime.UtcNow;
-                smoothedMbps=0;
-                speedTimer.Start();
-
-                SetStatus(
-                    "Universal Turbo v2.3 running — "+laneCount+
-                    " adaptive HTTP lanes on "+new Uri(BaseUrl).Port+
-                    " • automatic protocol fallback.",
-                    false);
-
-                var errors=new ConcurrentQueue<string>();
-                var tasks=new List<Task>();
-
-                foreach(var lane in lanes)
-                {
-                    var captured=lane;
-                    tasks.Add(Task.Run(async()=>{
-                        try
-                        {
-                            await DownloadBundleLaneAsync(captured,token,errors);
-                        }
-                        catch(OperationCanceledException){throw;}
-                        catch(Exception ex)
-                        {
-                            errors.Enqueue("Lane stopped: "+ex.Message);
-                        }
-                    },token));
-                }
-
-                await Task.WhenAll(tasks);
-                token.ThrowIfCancellationRequested();
-
-                long finished=files.Sum(f=>
-                    File.Exists(f.FinalPath) && new FileInfo(f.FinalPath).Length==f.Size ? f.Size :
-                    (File.Exists(f.PartPath)?Math.Min(f.Size,new FileInfo(f.PartPath).Length):0));
-
-                Interlocked.Exchange(ref completedBytes,finished);
-                UpdateSpeed();
-
-                if(errors.IsEmpty && finished>=totalBytes)
-                {
-                    progress.Value=1000;
-                    SetStatus("DONE — "+files.Count+" files copied to "+destination,false);
-                }
-                else
-                {
-                    SetStatus(
-                        "Transfer finished with "+errors.Count+
-                        " issue(s). Partial files are preserved; press Start again to resume. "+
-                        (errors.IsEmpty?"":errors.FirstOrDefault()),
-                        true);
-                }
+                endpoint = found;
+                addressBox.Text = found.ToString();
+                SetStatus("FlashDrop found at " + found, false);
+                await LoadFolderAsync("/");
             }
-            catch(OperationCanceledException)
+            catch (Exception ex)
             {
-                SetStatus("Transfer cancelled. Partial files are kept and will resume next time.",true);
-            }
-            catch(Exception ex)
-            {
-                SetStatus("Transfer stopped: "+ex.Message+"  Partial files are preserved for resume.",true);
+                SetStatus("Detection error: " + ex.Message, true);
             }
             finally
             {
-                speedTimer.Stop();
-                if(transferWatch!=null)transferWatch.Stop();
-                cts.Dispose();
-                cts=null;
-                startBtn.Enabled=true;
-                cancelBtn.Enabled=false;
+                detectBtn.Enabled = true;
+            }
+        }
+
+        async Task ConnectAndLoadAsync()
+        {
+            try
+            {
+                endpoint = await ResolveEndpointAsync(addressBox.Text);
+                if (endpoint == null) throw new IOException("FTP server not found on this phone");
+                addressBox.Text = endpoint.ToString();
+                await LoadFolderAsync("/");
+            }
+            catch (Exception ex)
+            {
+                connectionLabel.Text = "Connection failed";
+                connectionLabel.ForeColor = Color.Firebrick;
+                SetStatus(ex.Message, true);
+            }
+        }
+
+        async Task LoadFolderAsync(string path)
+        {
+            if (endpoint == null)
+            {
+                endpoint = await ResolveEndpointAsync(addressBox.Text);
+                if (endpoint == null) throw new IOException("Connect to the phone first");
+            }
+
+            ToggleConnect(false);
+
+            try
+            {
+                List<FtpItem> items;
+
+                using (var ftp = new FtpSession(endpoint.Host, endpoint.Port))
+                {
+                    await ftp.ConnectAsync(CancellationToken.None);
+                    items = await ftp.ListAsync(path, CancellationToken.None);
+                }
+
+                currentPath = NormalizeRemote(path);
+                pathLabel.Text = currentPath == "/" ? "Internal storage" : "Internal storage " + currentPath;
+                remoteList.Items.Clear();
+
+                foreach (var x in items)
+                {
+                    var li = new ListViewItem(x.Name);
+                    li.Tag = x;
+                    li.SubItems.Add(x.IsDirectory ? "Folder" : "File");
+                    li.SubItems.Add(x.IsDirectory ? "—" : FormatBytes(x.Size));
+                    li.SubItems.Add(x.ModifiedUtc == DateTime.MinValue ? "—" : x.ModifiedUtc.ToLocalTime().ToString("g"));
+
+                    if (x.IsDirectory)
+                    {
+                        li.ForeColor = Color.FromArgb(32, 74, 156);
+                        li.Font = new Font(remoteList.Font, FontStyle.Bold);
+                    }
+
+                    remoteList.Items.Add(li);
+                }
+
+                connectionLabel.Text = "FTP connected";
+                connectionLabel.ForeColor = Green;
+                SetStatus("Connected through the stable FTP engine. Double-click a folder or start copying the current folder tree.", false);
+            }
+            finally
+            {
                 ToggleConnect(true);
             }
         }
 
-        long RemainingBytes(RemoteFile f)
+        async Task OpenSelectedAsync()
         {
-            if(File.Exists(f.FinalPath) && new FileInfo(f.FinalPath).Length==f.Size)return 0;
-
-            long partial=0;
-            try
-            {
-                if(File.Exists(f.PartPath))partial=Math.Min(f.Size,new FileInfo(f.PartPath).Length);
-            }
-            catch{}
-
-            return Math.Max(0,f.Size-partial);
+            if (remoteList.SelectedItems.Count == 0) return;
+            var x = remoteList.SelectedItems[0].Tag as FtpItem;
+            if (x != null && x.IsDirectory) await LoadFolderAsync(x.FullPath);
         }
 
-        async Task BuildManifestAsync(string remote,string rel,string destRoot,List<RemoteFile> files,CancellationToken token)
+        async Task UpAsync()
         {
-            token.ThrowIfCancellationRequested();
-            var list=await GetListAsync(remote,token);
+            string p = NormalizeRemote(currentPath);
+            if (p == "/") { await LoadFolderAsync("/"); return; }
 
-            foreach(var x in (list.items??new PhoneItem[0]))
-            {
-                token.ThrowIfCancellationRequested();
-
-                string original=Sanitize(x.name);
-                string safe=CompactComponent(original,72);
-                string childRel=string.IsNullOrEmpty(rel)?safe:Path.Combine(rel,safe);
-
-                string candidate=Path.Combine(destRoot,childRel);
-
-                if(candidate.Length>205)
-                {
-                    string compact="_"+Hash8(x.path)+"_"+CompactComponent(original,44);
-                    childRel=Path.Combine("_LongPaths",compact);
-                    candidate=Path.Combine(destRoot,childRel);
-                }
-
-                if(candidate.Length>225)
-                {
-                    string compact="_"+Hash8(x.path)+"_"+CompactComponent(original,24);
-                    childRel=Path.Combine("_LP",compact);
-                    candidate=Path.Combine(destRoot,childRel);
-                }
-
-                if(x.dir)
-                {
-                    Directory.CreateDirectory(candidate);
-                    await BuildManifestAsync(x.path,childRel,destRoot,files,token);
-                }
-                else
-                {
-                    files.Add(new RemoteFile{
-                        RemotePath=x.path,
-                        RelativePath=childRel,
-                        Size=Math.Max(0,x.size),
-                        Modified=x.modified,
-                        FinalPath=candidate,
-                        PartPath=candidate+".flashdrop.part"
-                    });
-                }
-            }
+            p = p.TrimEnd('/');
+            int i = p.LastIndexOf('/');
+            p = i <= 0 ? "/" : p.Substring(0, i);
+            await LoadFolderAsync(p);
         }
 
-        static string CompactComponent(string name,int max)
+        async Task StartTransferAsync()
         {
-            if(string.IsNullOrEmpty(name))return "unnamed";
-            if(max<18)max=18;
-            if(name.Length<=max)return name;
+            if (transferCts != null) return;
 
-            string ext="";
-            string stem=name;
+            if (endpoint == null)
+            {
+                endpoint = await ResolveEndpointAsync(addressBox.Text);
+                if (endpoint == null)
+                {
+                    SetStatus("Connect to the phone first.", true);
+                    return;
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(localBox.Text))
+            {
+                SetStatus("Choose a destination folder.", true);
+                return;
+            }
+
+            transferCts = new CancellationTokenSource();
+            var token = transferCts.Token;
+            startBtn.Enabled = false;
+            cancelBtn.Enabled = true;
+            ToggleConnect(false);
+            progress.Value = 0;
+            completedBytes = 0;
+            totalBytes = 0;
+            smoothedMbps = 0;
 
             try
             {
-                ext=Path.GetExtension(name);
-                if(ext.Length>12)ext="";
-                if(!string.IsNullOrEmpty(ext))stem=name.Substring(0,name.Length-ext.Length);
-            }
-            catch
-            {
-                ext="";
-                stem=name;
-            }
+                SetStatus("Scanning phone folder over FTP...", false);
 
-            string hash=Hash8(name);
-            int keep=Math.Max(6,max-hash.Length-ext.Length-2);
+                string rootName = currentPath == "/" ? "PhoneBackup" : CompactComponent(RemoteLeaf(currentPath), 72);
+                string destRoot = Path.Combine(localBox.Text, rootName);
+                Directory.CreateDirectory(destRoot);
 
-            if(stem.Length>keep)stem=stem.Substring(0,keep);
+                var files = new List<RemoteFile>();
 
-            return stem+"_"+hash+ext;
-        }
-
-        static string Hash8(string s)
-        {
-            unchecked
-            {
-                uint h=2166136261;
-
-                foreach(char c in (s??""))
+                using (var scan = new FtpSession(endpoint.Host, endpoint.Port))
                 {
-                    h^=c;
-                    h*=16777619;
+                    await scan.ConnectAsync(token);
+                    await BuildManifestAsync(scan, currentPath, "", destRoot, files, token);
                 }
 
-                return h.ToString("x8");
-            }
-        }
+                totalBytes = files.Sum(f => f.Size);
+                totalLabel.Text = files.Count + " files • " + FormatBytes(totalBytes);
 
-        async Task<double> RunHttpBenchmarkAsync(long bytes,CancellationToken token)
-        {
-            string url=BaseUrl+"/api/bench?pin="+Uri.EscapeDataString(Pin)+"&bytes="+bytes;
-            var req=(HttpWebRequest)WebRequest.Create(url);
-            req.Method="GET";
-            req.Proxy=null;
-            req.KeepAlive=true;
-            req.Timeout=15000;
-            req.ReadWriteTimeout=15000;
+                var queue = new ConcurrentQueue<RemoteFile>();
+                long already = 0;
 
-            var sw=Stopwatch.StartNew();
-            long got=0;
-
-            using(token.Register(()=>{try{req.Abort();}catch{}}))
-            using(var res=(HttpWebResponse)await req.GetResponseAsync())
-            using(var input=res.GetResponseStream())
-            {
-                byte[] buf=new byte[1024*1024];
-
-                while(got<bytes)
+                foreach (var f in files)
                 {
-                    int n=await ReadWithTimeoutAsync(
-                        input,buf,0,(int)Math.Min(buf.Length,bytes-got),token,15000);
+                    token.ThrowIfCancellationRequested();
+                    Directory.CreateDirectory(Path.GetDirectoryName(f.FinalPath));
 
-                    if(n<=0)break;
-                    got+=n;
-                }
-            }
+                    if (f.Size == 0)
+                    {
+                        if (!File.Exists(f.FinalPath)) File.WriteAllBytes(f.FinalPath, new byte[0]);
+                        continue;
+                    }
 
-            sw.Stop();
-
-            if(got!=bytes)
-                throw new IOException("LAN benchmark incomplete "+got+"/"+bytes);
-
-            return got/1048576d/Math.Max(.001,sw.Elapsed.TotalSeconds);
-        }
-
-        async Task DownloadBundleLaneAsync(
-            List<RemoteFile> lane,
-            CancellationToken token,
-            ConcurrentQueue<string> errors)
-        {
-            int cursor=0;
-
-            while(cursor<lane.Count)
-            {
-  
+                    if (File.Exists(f.FinalPath) && new FileInfo(f.FinalPath).Length == f.Size)
+                    {
+                        already += 

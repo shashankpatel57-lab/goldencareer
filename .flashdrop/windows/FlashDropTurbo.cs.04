@@ -1,286 +1,249 @@
-              token.ThrowIfCancellationRequested();
+f.Size;
+                        continue;
+                    }
 
-                var batch=new List<RemoteFile>();
-                int bodyEstimate=0;
-
-                while(cursor<lane.Count && batch.Count<400 && bodyEstimate<2*1024*1024)
-                {
-                    var f=lane[cursor++];
-                    batch.Add(f);
-                    bodyEstimate+=128+(f.RemotePath==null?0:f.RemotePath.Length*2);
+                    long part = SafePartLength(f);
+                    already += part;
+                    queue.Enqueue(f);
                 }
 
-                int attempts=0;
+                Interlocked.Exchange(ref completedBytes, already);
 
-                while(true)
+                if (queue.IsEmpty)
                 {
-                    token.ThrowIfCancellationRequested();
+                    progress.Value = 1000;
+                    SetStatus("Everything is already copied.", false);
+                    return;
+                }
 
-                    var todo=batch.Where(f=>
-                        !(File.Exists(f.FinalPath) && new FileInfo(f.FinalPath).Length==f.Size))
-                        .ToList();
+                speedSampleBytes = already;
+                speedSampleAt = DateTime.UtcNow;
+                speedTimer.Start();
 
-                    if(todo.Count==0)break;
+                int workers = Math.Max(1, Math.Min((int)workersBox.Value, queue.Count));
+                int bufferBytes = (int)bufferBox.Value * 1024 * 1024;
+                bufferBytes = Math.Max(512 * 1024, Math.Min(8 * 1024 * 1024, bufferBytes));
 
-                    attempts++;
+                SetStatus(
+                    "Turbo 3 running — " + workers +
+                    " persistent FTP workers • automatic resume • no HTTP API calls.",
+                    false);
 
-                    if(attempts>6)
+                var errors = new ConcurrentQueue<string>();
+                var tasks = new List<Task>();
+
+                for (int w = 0; w < workers; w++)
+                {
+                    tasks.Add(Task.Run(async () =>
                     {
-                        foreach(var f in todo)
-                            errors.Enqueue(f.RemotePath+" : repeated connection interruption");
-                        break;
-                    }
+                        FtpSession ftp = null;
 
-                    try
-                    {
-                        await DownloadBundleRequestAsync(todo,token,errors);
-                        break;
-                    }
-                    catch(OperationCanceledException){throw;}
-                    catch(Exception ex)
-                    {
-                        if(attempts>=2)
+                        try
                         {
-                            foreach(var f in todo)
-                                errors.Enqueue(f.RemotePath+" : "+ex.Message);
-                            break;
+                            RemoteFile file;
+
+                            while (!token.IsCancellationRequested && queue.TryDequeue(out file))
+                            {
+                                bool ok = false;
+                                Exception last = null;
+
+                                for (int attempt = 1; attempt <= 4 && !ok; attempt++)
+                                {
+                                    try
+                                    {
+                                        if (ftp == null)
+                                        {
+                                            ftp = new FtpSession(endpoint.Host, endpoint.Port);
+                                            await ftp.ConnectAsync(token);
+                                        }
+
+                                        long offset = SafePartLength(file);
+
+                                        await ftp.DownloadAsync(
+                                            file.RemotePath,
+                                            file.PartPath,
+                                            file.Size,
+                                            offset,
+                                            bufferBytes,
+                                            token,
+                                            n => Interlocked.Add(ref completedBytes, n));
+
+                                        FinalizeFile(file);
+                                        ok = true;
+                                    }
+                                    catch (OperationCanceledException) { throw; }
+                                    catch (Exception ex)
+                                    {
+                                        last = ex;
+                                        try { if (ftp != null) ftp.Dispose(); } catch { }
+                                        ftp = null;
+
+                                        if (attempt < 4)
+                                            await Task.Delay(250 * attempt, token);
+                                    }
+                                }
+
+                                if (!ok)
+                                    errors.Enqueue(file.RemotePath + " : " + (last == null ? "transfer failed" : last.Message));
+                            }
                         }
-                        Thread.Sleep(200*attempts);
-                    }
+                        finally
+                        {
+                            try { if (ftp != null) ftp.Dispose(); } catch { }
+                        }
+                    }, token));
                 }
-            }
-        }
 
-        async Task DownloadBundleRequestAsync(
-            List<RemoteFile> files,
-            CancellationToken token,
-            ConcurrentQueue<string> errors)
-        {
-            bool done=false;
-            Exception last=null;
+                await Task.WhenAll(tasks);
+                token.ThrowIfCancellationRequested();
 
-            try
-            {
-                await DownloadBundleV2Async(files,token,errors);
-                done=true;
-            }
-            catch(Exception ex)
-            {
-                last=ex;
-            }
+                UpdateSpeed();
 
-            if(done)return;
-
-            try
-            {
-                await DownloadBulkV1Async(files,token,errors);
-                done=true;
-            }
-            catch(Exception ex)
-            {
-                last=ex;
-            }
-
-            if(done)return;
-
-            SetStatus("Using universal resumable HTTP file mode on this phone…",false);
-            await DownloadFilesHttpFallbackAsync(files,token,errors);
-        }
-
-        async Task DownloadBundleV2Async(
-            List<RemoteFile> files,
-            CancellationToken token,
-            ConcurrentQueue<string> errors)
-        {
-            var sb=new StringBuilder(files.Count*128);
-
-            for(int i=0;i<files.Count;i++)
-            {
-                var f=files[i];
-                long offset=SafePartialLength(f);
-                string p64=Convert.ToBase64String(Encoding.UTF8.GetBytes(f.RemotePath??""));
-                sb.Append(i).Append('\t').Append(offset).Append('\t').Append(p64).Append('\n');
-            }
-
-            byte[] body=Encoding.UTF8.GetBytes(sb.ToString());
-            string url=BaseUrl+"/api/bundle?pin="+Uri.EscapeDataString(Pin);
-            await ReadMultiFileHttpStreamAsync(url,body,files,token,errors,true);
-        }
-
-        async Task DownloadBulkV1Async(
-            List<RemoteFile> files,
-            CancellationToken token,
-            ConcurrentQueue<string> errors)
-        {
-            var sb=new StringBuilder(files.Count*128);
-
-            for(int i=0;i<files.Count;i++)
-            {
-                var f=files[i];
-                long offset=SafePartialLength(f);
-                string p64=Convert.ToBase64String(Encoding.UTF8.GetBytes(f.RemotePath??""));
-                sb.Append(i).Append('|').Append(offset).Append('|').Append(p64).Append('\n');
-            }
-
-            byte[] body=Encoding.UTF8.GetBytes(sb.ToString());
-            string url=BaseUrl+"/api/bulk?pin="+Uri.EscapeDataString(Pin);
-            await ReadMultiFileHttpStreamAsync(url,body,files,token,errors,false);
-        }
-
-        long SafePartialLength(RemoteFile f)
-        {
-            long offset=0;
-
-            try
-            {
-                if(File.Exists(f.PartPath))
+                long done = 0;
+                foreach (var f in files)
                 {
-                    offset=new FileInfo(f.PartPath).Length;
-
-                    if(offset<0 || offset>f.Size)
-                    {
-                        File.Delete(f.PartPath);
-                        offset=0;
-                    }
+                    if (File.Exists(f.FinalPath) && new FileInfo(f.FinalPath).Length == f.Size)
+                        done += f.Size;
+                    else
+                        done += SafePartLength(f);
                 }
+
+                Interlocked.Exchange(ref completedBytes, done);
+                UpdateSpeed();
+
+                if (errors.IsEmpty && done >= totalBytes)
+                {
+                    progress.Value = 1000;
+                    SetStatus("DONE — " + files.Count + " files copied to " + destRoot, false);
+                }
+                else
+                {
+                    SetStatus(
+                        "Transfer completed with " + errors.Count +
+                        " issue(s). Partial files remain resumable. " +
+                        (errors.IsEmpty ? "" : errors.FirstOrDefault()),
+                        true);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                SetStatus("Cancelled. Partial files are preserved for resume.", true);
+            }
+            catch (Exception ex)
+            {
+                SetStatus("Transfer stopped: " + ex.Message, true);
+            }
+            finally
+            {
+                speedTimer.Stop();
+                transferCts.Dispose();
+                transferCts = null;
+                startBtn.Enabled = true;
+                cancelBtn.Enabled = false;
+                ToggleConnect(true);
+            }
+        }
+
+        async Task BuildManifestAsync(
+            FtpSession ftp,
+            string remote,
+            string relative,
+            string destRoot,
+            List<RemoteFile> files,
+            CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+
+            List<FtpItem> items;
+
+            try
+            {
+                items = await ftp.ListAsync(remote, token);
             }
             catch
             {
-                offset=0;
+                return;
             }
 
-            return offset;
-        }
-
-        async Task ReadMultiFileHttpStreamAsync(
-            string url,
-            byte[] body,
-            List<RemoteFile> files,
-            CancellationToken token,
-            ConcurrentQueue<string> errors,
-            bool tabs)
-        {
-            var req=(HttpWebRequest)WebRequest.Create(url);
-            req.Method="POST";
-            req.ContentType="text/plain; charset=utf-8";
-            req.ContentLength=body.Length;
-            req.Proxy=null;
-            req.KeepAlive=true;
-            req.Timeout=30000;
-            req.ReadWriteTimeout=30000;
-            req.SendChunked=false;
-
-            using(token.Register(()=>{try{req.Abort();}catch{}}))
-            {
-                using(var rs=await req.GetRequestStreamAsync())
-                    await rs.WriteAsync(body,0,body.Length,token);
-
-                using(var res=(HttpWebResponse)await req.GetResponseAsync())
-                using(var input=res.GetResponseStream())
-                {
-                    while(true)
-                    {
-                        token.ThrowIfCancellationRequested();
-
-                        string line=await ReadAsciiLineWithTimeoutAsync(input,token,20000);
-
-                        if(string.IsNullOrEmpty(line))
-                            throw new IOException("Transfer stream ended unexpectedly");
-
-                        if(line=="DONE")break;
-
-                        string[] p=tabs
-                            ? line.Split('\t')
-                            : line.Split(new[]{' '},StringSplitOptions.RemoveEmptyEntries);
-
-                        if(p.Length>=3 && p[0]=="ERR")
-                        {
-                            int bad;
-                            if(int.TryParse(p[1],out bad) && bad>=0 && bad<files.Count)
-                                errors.Enqueue(files[bad].RemotePath+" : "+p[2]);
-                            continue;
-                        }
-
-                        if(p.Length<4 || p[0]!="FILE")
-                            throw new IOException("Invalid Turbo frame: "+line);
-
-                        int index=int.Parse(p[1]);
-                        long remaining=long.Parse(p[2]);
-                        long size=long.Parse(p[3]);
-
-                        if(index<0 || index>=files.Count)
-                            throw new IOException("Invalid Turbo file index");
-
-                        await ReceiveOneFramedFileAsync(
-                            input,files[index],remaining,size,token);
-                    }
-                }
-            }
-        }
-
-        async Task ReceiveOneFramedFileAsync(
-            Stream input,
-            RemoteFile file,
-            long remaining,
-            long size,
-            CancellationToken token)
-        {
-            long offset=size-remaining;
-            int bufferBytes=(int)chunkBox.Value*1024*1024;
-            bufferBytes=Math.Max(512*1024,Math.Min(8*1024*1024,bufferBytes));
-            byte[] buf=new byte[bufferBytes];
-
-            Directory.CreateDirectory(Path.GetDirectoryName(file.FinalPath));
-
-            using(var fs=new FileStream(
-                file.PartPath,
-                FileMode.OpenOrCreate,
-                FileAccess.Write,
-                FileShare.Read,
-                bufferBytes,
-                FileOptions.SequentialScan | FileOptions.Asynchronous))
-            {
-                fs.Seek(offset,SeekOrigin.Begin);
-                if(fs.Length!=offset)fs.SetLength(offset);
-
-                long got=0;
-
-                while(got<remaining)
-                {
-                    token.ThrowIfCancellationRequested();
-
-                    int n=await ReadWithTimeoutAsync(
-                        input,buf,0,(int)Math.Min(buf.Length,remaining-got),token,20000);
-
-                    if(n<=0)
-                        throw new IOException("File stream ended early");
-
-                    await fs.WriteAsync(buf,0,n,token);
-                    got+=n;
-                    Interlocked.Add(ref completedBytes,n);
-                }
-            }
-
-            FinalizePartFile(file);
-        }
-
-        async Task DownloadFilesHttpFallbackAsync(
-            List<RemoteFile> files,
-            CancellationToken token,
-            ConcurrentQueue<string> errors)
-        {
-            foreach(var file in files)
+            foreach (var x in items)
             {
                 token.ThrowIfCancellationRequested();
 
-                if(File.Exists(file.FinalPath) && new FileInfo(file.FinalPath).Length==file.Size)
-                    continue;
+                string safe = CompactComponent(Sanitize(x.Name), 72);
+                string rel = string.IsNullOrEmpty(relative) ? safe : Path.Combine(relative, safe);
+                string local = Path.Combine(destRoot, rel);
 
-                bool ok=false;
-                Exception last=null;
-
-                for(int attempt=1;attempt<=4 && !ok;attempt++)
+                if (local.Length > 205)
                 {
-                    try
+                    string compact = "_" + Hash8(x.FullPath) + "_" + CompactComponent(safe, 42);
+                    rel = Path.Combine("_LongPaths", compact);
+                    local = Path.Combine(destRoot, rel);
+                }
+
+                if (local.Length > 225)
+                {
+                    string compact = "_" + Hash8(x.FullPath) + "_" + CompactComponent(safe, 22);
+                    rel = Path.Combine("_LP", compact);
+                    local = Path.Combine(destRoot, rel);
+                }
+
+                if (x.IsDirectory)
+                {
+                    Directory.CreateDirectory(local);
+                    await BuildManifestAsync(ftp, x.FullPath, rel, destRoot, files, token);
+                }
+                else
+                {
+                    files.Add(new RemoteFile
                     {
-  
+                        RemotePath = x.FullPath,
+                        FinalPath = local,
+                        PartPath = local + ".flashdrop.part",
+                        Size = x.Size,
+                        ModifiedUtc = x.ModifiedUtc
+                    });
+                }
+            }
+        }
+
+        void FinalizeFile(RemoteFile file)
+        {
+            long size = File.Exists(file.PartPath) ? new FileInfo(file.PartPath).Length : 0;
+            if (size != file.Size) throw new IOException("Incomplete local file " + size + "/" + file.Size);
+
+            if (File.Exists(file.FinalPath)) File.Delete(file.FinalPath);
+            File.Move(file.PartPath, file.FinalPath);
+
+            if (file.ModifiedUtc != DateTime.MinValue)
+            {
+                try { File.SetLastWriteTimeUtc(file.FinalPath, file.ModifiedUtc); } catch { }
+            }
+        }
+
+        long SafePartLength(RemoteFile f)
+        {
+            try
+            {
+                if (!File.Exists(f.PartPath)) return 0;
+                long n = new FileInfo(f.PartPath).Length;
+
+                if (n < 0 || n > f.Size)
+                {
+                    File.Delete(f.PartPath);
+                    return 0;
+                }
+
+                return n;
+            }
+            catch { return 0; }
+        }
+
+        void UpdateSpeed()
+        {
+            long nowBytes = Interlocked.Read(ref completedBytes);
+            DateTime now = DateTime.UtcNow;
+            double seconds = Math.Max(0.001, (now - speedSampleAt).TotalSeconds);
+            long delta = Math.Max(0, nowBytes - speedSampleBytes);
+            double instant = delta / 1048576d / seconds;
+
+            smoothedMbps = smoothedMbps <= 0 ? instant : smoothedMbps * 0.55 + instant * 0.45;
