@@ -1,4 +1,4 @@
-                   " seconds");
+                 " seconds");
             }
 
             return await task;
@@ -384,4 +384,4 @@
             remoteList.Columns.Add("Type", 105);
             remoteList.Columns.Add("Size", 125);
             remoteList.Columns.Add("Modified", 180);
-            remoteList.DoubleClick += async (s, e) => await OpenSelect
+            remoteList.DoubleClick += async (s, e) => await OpenSelectedA

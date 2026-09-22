@@ -1,4 +1,4 @@
-edAsync();
+sync();
             browser.Controls.Add(remoteList, 0, 1);
 
             var destCard = Card();
@@ -359,4 +359,4 @@ edAsync();
                 var pending = new List<RemoteFile>();
                 long already = 0;
 
-                foreach (var f 
+                foreach (var f in f

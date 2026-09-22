@@ -1,4 +1,4 @@
-in files)
+iles)
                 {
                     token.ThrowIfCancellationRequested();
                     Directory.CreateDirectory(Path.GetDirectoryName(f.FinalPath));
@@ -363,4 +363,4 @@ in files)
                         long actual = 0;
                         try
                         {
-                            if (Fi
+                            if (File.Ex

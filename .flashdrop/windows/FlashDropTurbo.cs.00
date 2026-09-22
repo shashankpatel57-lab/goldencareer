@@ -434,4 +434,4 @@ namespace FlashDropTurbo
                     verifyErrors.Enqueue(file.RemotePath + " : SHA-256 mismatch");
             }
 
-            var done = await ReadResponseAsync(
+            var done = await ReadResponseAsync(3

@@ -1,4 +1,4 @@
-le.Exists(f.FinalPath))
+ists(f.FinalPath))
                                 actual = new FileInfo(f.FinalPath).Length;
                             else if (File.Exists(f.PartPath))
                                 actual = new FileInfo(f.PartPath).Length;
@@ -29,7 +29,7 @@ le.Exists(f.FinalPath))
         static string Csv(string s)
         {
             s = s ?? "";
-            return """ + s.Replace(""", """") + """;
+            return "\"" + s.Replace("\"", "\"\"") + "\"";
         }
 
         async Task BuildManifestAsync(

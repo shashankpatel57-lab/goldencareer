@@ -1,4 +1,4 @@
-30000, token);
+0000, token);
             if (done.Code != 226)
                 throw new IOException("Verification did not finish: " + done.Text);
         }
@@ -445,4 +445,4 @@
                 throw new IOException(
                     "No data received for " +
                     (timeoutMs / 1000) +
- 
+   
