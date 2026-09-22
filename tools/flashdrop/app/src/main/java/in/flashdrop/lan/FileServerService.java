@@ -13,6 +13,8 @@ import android.os.IBinder;
 import android.os.PowerManager;
 
 import java.io.File;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.security.SecureRandom;
 import java.util.Locale;
 
@@ -50,7 +52,8 @@ public class FileServerService extends Service {
             pin = String.format(Locale.US, "%06d", new SecureRandom().nextInt(1_000_000));
             File root = Environment.getExternalStorageDirectory();
 
-            httpServer = new HttpFileServer(root, pin);
+            byte[] turbo = loadTurboHelper();
+            httpServer = new HttpFileServer(root, pin, turbo);
             httpServer.start();
 
             ftpServer = new FtpFileServer(root);
@@ -62,7 +65,7 @@ public class FileServerService extends Service {
             running = true;
 
             NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-            nm.notify(1001, buildNotification("Windows Explorer: " + ftpUrl));
+            nm.notify(1001, buildNotification("Turbo: " + httpUrl + " • Explorer: " + ftpUrl));
         } catch (Exception e) {
             running = false;
             httpUrl = null;
@@ -70,6 +73,20 @@ public class FileServerService extends Service {
             stopServer();
             stopForeground(true);
             stopSelf();
+        }
+    }
+
+    private byte[] loadTurboHelper() {
+        try (InputStream in = getAssets().open("FlashDropTurbo.exe");
+             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            byte[] buf = new byte[64 * 1024];
+            int n;
+            while ((n = in.read(buf)) >= 0) {
+                if (n > 0) out.write(buf, 0, n);
+            }
+            return out.toByteArray();
+        } catch (Exception e) {
+            return null;
         }
     }
 
