@@ -1,54 +1,98 @@
-: "+errors.FirstOrDefault(),true);
+nt n=await ns.ReadAsync(buf,0,(int)Math.Min(buf.Length,bytes-got),token);
+                        if(n<=0)break;
+                        got+=n;
+                    }
+                    if(got!=bytes)throw new IOException("Turbo benchmark short read");
+                }
             }
-            catch(OperationCanceledException){SetStatus("Transfer cancelled. Partial .flashdrop.part files can be deleted safely.",true);}
-            catch(Exception ex){SetStatus("Transfer stopped: "+ex.Message,true);}
-            finally
+            sw.Stop();
+            return bytes/1048576d/Math.Max(.001,sw.Elapsed.TotalSeconds);
+        }
+
+        async Task DownloadFileTurboAsync(RemoteFile file,CancellationToken token)
+        {
+            long offset=0;
+            if(File.Exists(file.PartPath))
             {
-                speedTimer.Stop(); if(transferWatch!=null) transferWatch.Stop(); cts.Dispose(); cts=null; startBtn.Enabled=true; cancelBtn.Enabled=false; ToggleConnect(true);
+                offset=new FileInfo(file.PartPath).Length;
+                if(offset<0 || offset>file.Size)
+                {
+                    File.Delete(file.PartPath);
+                    offset=0;
+                }
+            }
+
+            using(var client=new TcpClient())
+            {
+                client.NoDelay=true;
+                client.ReceiveBufferSize=4*1024*1024;
+                client.SendBufferSize=1024*1024;
+                await client.ConnectAsync(TurboHost,TurboPort);
+
+                using(var ns=client.GetStream())
+                using(token.Register(()=>{try{client.Close();}catch{}}))
+                {
+                    string encoded=Convert.ToBase64String(Encoding.UTF8.GetBytes(file.RemotePath??""));
+                    string request=
+                        "FLASHDROP/1\n"+
+                        "PIN "+Pin+"\n"+
+                        "MODE GET\n"+
+                        "PATH "+encoded+"\n"+
+                        "OFFSET "+offset+"\n\n";
+
+                    byte[] hdr=Encoding.UTF8.GetBytes(request);
+                    await ns.WriteAsync(hdr,0,hdr.Length,token);
+
+                    string line=await ReadAsciiLineAsync(ns,token);
+                    if(!line.StartsWith("OK "))throw new IOException("Turbo server: "+line);
+
+                    string[] p=line.Split(new[]{' '},StringSplitOptions.RemoveEmptyEntries);
+                    long remaining=p.Length>1?long.Parse(p[1]):(file.Size-offset);
+
+                    int bufferBytes=(int)chunkBox.Value*1024*1024;
+                    bufferBytes=Math.Max(256*1024,Math.Min(8*1024*1024,bufferBytes));
+                    byte[] buf=new byte[bufferBytes];
+
+                    using(var fs=new FileStream(
+                        file.PartPath,
+                        FileMode.OpenOrCreate,
+                        FileAccess.Write,
+                        FileShare.Read,
+                        bufferBytes,
+                        FileOptions.SequentialScan))
+                    {
+                        fs.Seek(offset,SeekOrigin.Begin);
+                        if(fs.Length!=offset)fs.SetLength(offset);
+
+                        long got=0;
+                        while(got<remaining)
+                        {
+                            token.ThrowIfCancellationRequested();
+                            int n=await ns.ReadAsync(buf,0,(int)Math.Min(buf.Length,remaining-got),token);
+                            if(n<=0)break;
+                            await fs.WriteAsync(buf,0,n,token);
+                            got+=n;
+                            Interlocked.Add(ref completedBytes,n);
+                        }
+                        await fs.FlushAsync(token);
+                        if(got!=remaining)throw new IOException("Short read "+got+"/"+remaining);
+                    }
+                }
             }
         }
 
-        async Task BuildManifestAsync(string remote,string rel,string destRoot,List<RemoteFile> files,CancellationToken token)
+        async Task<string> ReadAsciiLineAsync(Stream input,CancellationToken token)
         {
-            token.ThrowIfCancellationRequested();
-            var list=await GetListAsync(remote,token);
-            foreach(var x in (list.items??new PhoneItem[0]))
+            var bytes=new List<byte>(128);
+            var one=new byte[1];
+            while(bytes.Count<4096)
             {
-                token.ThrowIfCancellationRequested();
-                string safe=Sanitize(x.name); string childRel=string.IsNullOrEmpty(rel)?safe:Path.Combine(rel,safe);
-                if(x.dir)
-                {
-                    Directory.CreateDirectory(Path.Combine(destRoot,childRel));
-                    await BuildManifestAsync(x.path,childRel,destRoot,files,token);
-                }
-                else
-                {
-                    var final=Path.Combine(destRoot,childRel);
-                    files.Add(new RemoteFile{RemotePath=x.path,RelativePath=childRel,Size=Math.Max(0,x.size),Modified=x.modified,FinalPath=final,PartPath=final+".flashdrop.part"});
-                }
+                int n=await input.ReadAsync(one,0,1,token);
+                if(n<=0)break;
+                if(one[0]==10)break;
+                if(one[0]!=13)bytes.Add(one[0]);
             }
-        }
-
-        async Task DownloadChunkAsync(ChunkJob job,CancellationToken token)
-        {
-            string url=BaseUrl+"/download?pin="+Uri.EscapeDataString(Pin)+"&path="+Uri.EscapeDataString(job.File.RemotePath);
-            var req=(HttpWebRequest)WebRequest.Create(url); req.Method="GET"; req.Proxy=null; req.KeepAlive=true; req.Timeout=30000; req.ReadWriteTimeout=30000; req.AddRange(job.Start,job.End);
-            var sp=req.ServicePoint; sp.ConnectionLimit=64; sp.UseNagleAlgorithm=false; sp.Expect100Continue=false;
-            using(token.Register(()=>{try{req.Abort();}catch{}}))
-            using(var res=(HttpWebResponse)await req.GetResponseAsync())
-            using(var input=res.GetResponseStream())
-            using(var fs=new FileStream(job.File.PartPath,FileMode.Open,FileAccess.Write,FileShare.ReadWrite,1024*1024,FileOptions.RandomAccess))
-            {
-                fs.Seek(job.Start,SeekOrigin.Begin);
-                byte[] buf=new byte[1024*1024]; long need=job.End-job.Start+1, got=0;
-                while(got<need)
-                {
-                    token.ThrowIfCancellationRequested();
-                    int n=await input.ReadAsync(buf,0,(int)Math.Min(buf.Length,need-got)); if(n<=0)break;
-                    await fs.WriteAsync(buf,0,n); got+=n; Interlocked.Add(ref completedBytes,n);
-                }
-                if(got!=need)throw new IOException("Short read "+got+"/"+need);
-            }
+            return Encoding.UTF8.GetString(bytes.ToArray());
         }
 
         void UpdateSpeed()

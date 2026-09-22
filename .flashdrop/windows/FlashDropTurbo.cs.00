@@ -99,7 +99,7 @@ namespace FlashDropTurbo
 
         public MainForm()
         {
-            Text = "FlashDrop Turbo v1.3 - by Shashank Patel";
+            Text = "FlashDrop Turbo v1.4 - by Shashank Patel";
             StartPosition = FormStartPosition.CenterScreen;
             MinimumSize = new Size(1000, 720);
             Size = new Size(1180, 820);
@@ -138,7 +138,7 @@ namespace FlashDropTurbo
             title.Location = new Point(26, 16);
             hero.Controls.Add(title);
 
-            var sub = L("High-speed parallel phone-to-PC transfer over your 5 GHz hotspot", 11.5f, Color.FromArgb(236,244,255), false);
+            var sub = L("High-speed sequential streaming over your 5 GHz hotspot", 11.5f, Color.FromArgb(236,244,255), false);
             sub.Location = new Point(28, 52);
             hero.Controls.Add(sub);
 
@@ -157,4 +157,19 @@ namespace FlashDropTurbo
                 Padding = new Padding(14,10,14,10),
                 BackColor = Color.White
             };
-            grid.RowStyles.Add(new RowStyle(SizeType
+            grid.RowStyles.Add(new RowStyle(SizeType.Absolute,24));
+            grid.RowStyles.Add(new RowStyle(SizeType.Absolute,42));
+            grid.RowStyles.Add(new RowStyle(SizeType.Percent,100));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,38));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,100));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,105));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,105));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,88));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,92));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,20));
+            connectCard.Controls.Add(grid);
+
+            grid.Controls.Add(L("PHONE HTTP ADDRESS",8.5f,Muted,true),0,0);
+            grid.Controls.Add(L("6-DIGIT PIN",8.5f,Muted,true),1,0);
+            grid.Controls.Add(L("WORKERS",8.5f,Muted,true),4,0);
+  

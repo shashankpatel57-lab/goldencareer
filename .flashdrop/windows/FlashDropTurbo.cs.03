@@ -1,61 +1,4 @@
-rtsWith("http://",StringComparison.OrdinalIgnoreCase) && !s.StartsWith("https://",StringComparison.OrdinalIgnoreCase)) s="http://"+s;
-                return s;
-            }
-        }
-        string Pin { get { return (pinBox.Text??"").Trim(); } }
-
-        async Task AutoDetectAsync()
-        {
-            SetStatus("Looking for FlashDrop on your current Wi‑Fi/hotspot…", false);
-            detectBtn.Enabled=false;
-            try
-            {
-                var gateways = NetworkInterface.GetAllNetworkInterfaces()
-                    .Where(n=>n.OperationalStatus==OperationalStatus.Up)
-                    .SelectMany(n=>n.GetIPProperties().GatewayAddresses)
-                    .Select(g=>g.Address)
-                    .Where(a=>a.AddressFamily==AddressFamily.InterNetwork && !IPAddress.IsLoopback(a))
-                    .Select(a=>a.ToString()).Distinct().ToList();
-                foreach(var ip in gateways)
-                {
-                    for(int p=8080;p<=8090;p++)
-                    {
-                        var u="http://"+ip+":"+p;
-                        if(await LooksLikeFlashDrop(u))
-                        {
-                            addressBox.Text=u;
-                            connectionLabel.Text="Phone found";
-                            connectionLabel.ForeColor=Green;
-                            SetStatus("Phone detected. Enter the 6‑digit PIN shown in FlashDrop, then click Connect.", false);
-                            return;
-                        }
-                    }
-                }
-                connectionLabel.Text="Not detected"; connectionLabel.ForeColor=Color.FromArgb(180,90,35);
-                SetStatus("Auto-detect did not find the phone. Enter the HTTP address shown in the Android app.", true);
-            }
-            catch(Exception ex){ SetStatus("Detection error: "+ex.Message,true); }
-            finally{ detectBtn.Enabled=true; }
-        }
-
-        async Task<bool> LooksLikeFlashDrop(string u)
-        {
-            return await Task.Run(()=>{
-                try
-                {
-                    var req=(HttpWebRequest)WebRequest.Create(u+"/"); req.Method="GET"; req.Timeout=450; req.ReadWriteTimeout=450; req.Proxy=null;
-                    using(var res=(HttpWebResponse)req.GetResponse()) using(var sr=new StreamReader(res.GetResponseStream()))
-                    {
-                         char[] b=new char[2048]; int n=sr.Read(b,0,b.Length); var s=new string(b,0,Math.Max(0,n));
-                        return s.IndexOf("FLASHDROP",StringComparison.OrdinalIgnoreCase)>=0;
-                    }
-                }catch{return false;}
-            });
-        }
-
-        async Task LoadFolderAsync(string path)
-        {
-            if(Pin.Length!=6){SetStatus("Enter the 6-digit PIN shown on the phone.",true); return;}
+n.Length!=6){SetStatus("Enter the 6-digit PIN shown on the phone.",true); return;}
             ToggleConnect(false);
             try
             {
@@ -105,4 +48,90 @@ rtsWith("http://",StringComparison.OrdinalIgnoreCase) && !s.StartsWith("https://
         async Task OpenSelectedAsync()
         {
             if(remoteList.SelectedItems.Count==0)return;
-            var x=remoteList.SelectedItems[0].Tag as PhoneIte
+            var x=remoteList.SelectedItems[0].Tag as PhoneItem;
+            if(x!=null && x.dir) await LoadFolderAsync(x.path);
+        }
+
+        async Task UpAsync()
+        {
+            if(string.IsNullOrEmpty(currentPath)){await LoadFolderAsync("");return;}
+            var p=currentPath.Replace('\\','/'); int i=p.LastIndexOf('/'); p=i<0?"":p.Substring(0,i); await LoadFolderAsync(p);
+        }
+
+        void ChooseFolder()
+        {
+            using(var f=new FolderBrowserDialog { Description="Choose where FlashDrop should save the phone folder", ShowNewFolderButton=true, SelectedPath=Directory.Exists(localBox.Text)?localBox.Text:"" })
+                if(f.ShowDialog(this)==DialogResult.OK)localBox.Text=f.SelectedPath;
+        }
+
+        void OpenDestination()
+        {
+            try{Directory.CreateDirectory(localBox.Text);Process.Start("explorer.exe",localBox.Text);}catch(Exception ex){SetStatus(ex.Message,true);}
+        }
+
+        async Task StartTransferAsync()
+        {
+            if(cts!=null)return;
+            if(Pin.Length!=6){SetStatus("Enter the PIN and connect first.",true);return;}
+            if(string.IsNullOrWhiteSpace(localBox.Text)){SetStatus("Choose a destination folder on the PC.",true);return;}
+
+            cts=new CancellationTokenSource();
+            var token=cts.Token;
+            startBtn.Enabled=false;
+            cancelBtn.Enabled=true;
+            ToggleConnect(false);
+            completedBytes=0;
+            totalBytes=0;
+            progress.Value=0;
+            transferWatch=Stopwatch.StartNew();
+            speedTimer.Start();
+
+            try
+            {
+                SetStatus("Testing direct LAN path…",false);
+                double link=await RunTurboBenchmarkAsync(8L*1024L*1024L,token);
+                SetStatus("Raw LAN test: "+link.ToString("0.0")+" MB/s. Scanning selected phone folder…",false);
+
+                var remoteRoot=currentPath??"";
+                string rootName=string.IsNullOrEmpty(remoteRoot)?"PhoneBackup":Sanitize(RemoteLeaf(remoteRoot));
+                string destination=Path.Combine(localBox.Text,rootName);
+                Directory.CreateDirectory(destination);
+
+                var files=new List<RemoteFile>();
+                await BuildManifestAsync(remoteRoot,"",destination,files,token);
+                totalBytes=files.Sum(f=>f.Size);
+                totalLabel.Text=files.Count+" files • "+FormatBytes(totalBytes);
+                if(files.Count==0){SetStatus("No readable files found in this folder.",true);return;}
+
+                int workers=(int)workersBox.Value;
+                var jobs=new ConcurrentQueue<RemoteFile>();
+                long alreadyDone=0;
+
+                foreach(var f in files)
+                {
+                    token.ThrowIfCancellationRequested();
+                    Directory.CreateDirectory(Path.GetDirectoryName(f.FinalPath));
+
+                    if(File.Exists(f.FinalPath) && new FileInfo(f.FinalPath).Length==f.Size)
+                    {
+                        alreadyDone+=f.Size;
+                        continue;
+                    }
+
+                    if(f.Size==0)
+                    {
+                        File.WriteAllBytes(f.FinalPath,new byte[0]);
+                        continue;
+                    }
+
+                    long partial=0;
+                    try
+                    {
+                        if(File.Exists(f.PartPath))
+                        {
+                            partial=new FileInfo(f.PartPath).Length;
+                            if(partial<0 || partial>f.Size)
+                            {
+                                File.Delete(f.PartPath);
+                                partial=0;
+            

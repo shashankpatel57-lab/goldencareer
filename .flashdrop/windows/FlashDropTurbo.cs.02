@@ -1,41 +1,4 @@
-var d = new TableLayoutPanel {
-                Dock=DockStyle.Fill,
-                ColumnCount=5,
-                RowCount=2,
-                Padding=new Padding(14,10,14,10),
-                BackColor=Color.White
-            };
-            d.RowStyles.Add(new RowStyle(SizeType.Absolute,28));
-            d.RowStyles.Add(new RowStyle(SizeType.Percent,100));
-            d.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
-            d.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,130));
-            d.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,125));
-            d.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,190));
-            d.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,115));
-            destCard.Controls.Add(d);
-
-            d.Controls.Add(L("DESTINATION ON THIS PC",9,Muted,true),0,0);
-            var turboNote=L("8 workers / 64 MB is a good starting point",8.8f,Muted,false);
-            turboNote.Dock=DockStyle.Fill;
-            turboNote.TextAlign=ContentAlignment.MiddleRight;
-            d.SetColumnSpan(turboNote,4);
-            d.Controls.Add(turboNote,1,0);
-
-            localBox = Box();
-            localBox.Text = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),"FlashDrop");
-            d.Controls.Add(localBox,0,1);
-
-            browseBtn=Btn("CHOOSE FOLDER",Color.FromArgb(229,248,241),Green);
-            browseBtn.Click+=(s,e)=>ChooseFolder();
-            d.Controls.Add(browseBtn,1,1);
-
-            openBtn=Btn("OPEN FOLDER",Color.FromArgb(240,244,250),Ink);
-            openBtn.Click+=(s,e)=>OpenDestination();
-            d.Controls.Add(openBtn,2,1);
-
-            startBtn=Btn("START TURBO COPY",Green,Color.White);
-            startBtn.Font=new Font("Segoe UI",10f,FontStyle.Bold);
-            startBtn.Click+=async(s,e)=>await StartTransferAsync();
+erAsync();
             d.Controls.Add(startBtn,3,1);
 
             cancelBtn=Btn("CANCEL",Color.FromArgb(255,236,238),Color.FromArgb(185,45,55));
@@ -66,7 +29,7 @@ var d = new TableLayoutPanel {
             bottom.SetColumnSpan(progress,3);
             bottom.Controls.Add(progress,0,0);
 
-            statusLabel=L("Ready. 100 GB/hour requires about 27.8 MB/s sustained.",9.5f,Muted,false);
+            statusLabel=L("Ready. v1.4 uses sequential raw TCP streaming. 100 GB/hour needs 27.8 MB/s.",9.5f,Muted,false);
             statusLabel.Dock=DockStyle.Fill;
             statusLabel.TextAlign=ContentAlignment.MiddleLeft;
             statusLabel.AutoEllipsis=true;
@@ -121,4 +84,61 @@ var d = new TableLayoutPanel {
             get
             {
                 var s=(addressBox.Text??"").Trim().TrimEnd('/');
-                if (!s.Sta
+                if (!s.StartsWith("http://",StringComparison.OrdinalIgnoreCase) && !s.StartsWith("https://",StringComparison.OrdinalIgnoreCase)) s="http://"+s;
+                return s;
+            }
+        }
+        string Pin { get { return (pinBox.Text??"").Trim(); } }
+
+        async Task AutoDetectAsync()
+        {
+            SetStatus("Looking for FlashDrop on your current Wi‑Fi/hotspot…", false);
+            detectBtn.Enabled=false;
+            try
+            {
+                var gateways = NetworkInterface.GetAllNetworkInterfaces()
+                    .Where(n=>n.OperationalStatus==OperationalStatus.Up)
+                    .SelectMany(n=>n.GetIPProperties().GatewayAddresses)
+                    .Select(g=>g.Address)
+                    .Where(a=>a.AddressFamily==AddressFamily.InterNetwork && !IPAddress.IsLoopback(a))
+                    .Select(a=>a.ToString()).Distinct().ToList();
+                foreach(var ip in gateways)
+                {
+                    for(int p=8080;p<=8090;p++)
+                    {
+                        var u="http://"+ip+":"+p;
+                        if(await LooksLikeFlashDrop(u))
+                        {
+                            addressBox.Text=u;
+                            connectionLabel.Text="Phone found";
+                            connectionLabel.ForeColor=Green;
+                            SetStatus("Phone detected. Enter the 6‑digit PIN shown in FlashDrop, then click Connect.", false);
+                            return;
+                        }
+                    }
+                }
+                connectionLabel.Text="Not detected"; connectionLabel.ForeColor=Color.FromArgb(180,90,35);
+                SetStatus("Auto-detect did not find the phone. Enter the HTTP address shown in the Android app.", true);
+            }
+            catch(Exception ex){ SetStatus("Detection error: "+ex.Message,true); }
+            finally{ detectBtn.Enabled=true; }
+        }
+
+        async Task<bool> LooksLikeFlashDrop(string u)
+        {
+            return await Task.Run(()=>{
+                try
+                {
+                    var req=(HttpWebRequest)WebRequest.Create(u+"/"); req.Method="GET"; req.Timeout=450; req.ReadWriteTimeout=450; req.Proxy=null;
+                    using(var res=(HttpWebResponse)req.GetResponse()) using(var sr=new StreamReader(res.GetResponseStream()))
+                    {
+                         char[] b=new char[2048]; int n=sr.Read(b,0,b.Length); var s=new string(b,0,Math.Max(0,n));
+                        return s.IndexOf("FLASHDROP",StringComparison.OrdinalIgnoreCase)>=0;
+                    }
+                }catch{return false;}
+            });
+        }
+
+        async Task LoadFolderAsync(string path)
+        {
+            if(Pi

@@ -1,92 +1,162 @@
-m;
-            if(x!=null && x.dir) await LoadFolderAsync(x.path);
-        }
-
-        async Task UpAsync()
-        {
-            if(string.IsNullOrEmpty(currentPath)){await LoadFolderAsync("");return;}
-            var p=currentPath.Replace('\\','/'); int i=p.LastIndexOf('/'); p=i<0?"":p.Substring(0,i); await LoadFolderAsync(p);
-        }
-
-        void ChooseFolder()
-        {
-            using(var f=new FolderBrowserDialog { Description="Choose where FlashDrop should save the phone folder", ShowNewFolderButton=true, SelectedPath=Directory.Exists(localBox.Text)?localBox.Text:"" })
-                if(f.ShowDialog(this)==DialogResult.OK)localBox.Text=f.SelectedPath;
-        }
-
-        void OpenDestination()
-        {
-            try{Directory.CreateDirectory(localBox.Text);Process.Start("explorer.exe",localBox.Text);}catch(Exception ex){SetStatus(ex.Message,true);}
-        }
-
-        async Task StartTransferAsync()
-        {
-            if(cts!=null){return;}
-            if(Pin.Length!=6){SetStatus("Enter the PIN and connect first.",true);return;}
-            if(string.IsNullOrWhiteSpace(localBox.Text)){SetStatus("Choose a destination folder on the PC.",true);return;}
-            cts=new CancellationTokenSource(); var token=cts.Token;
-            startBtn.Enabled=false; cancelBtn.Enabled=true; ToggleConnect(false); completedBytes=0; totalBytes=0; progress.Value=0;
-            transferWatch=Stopwatch.StartNew(); speedTimer.Start();
-            try
-            {
-                SetStatus("Scanning the selected phone folder…",false);
-                var remoteRoot=currentPath??"";
-                string rootName=string.IsNullOrEmpty(remoteRoot)?"PhoneBackup":Sanitize(RemoteLeaf(remoteRoot));
-                string destination=Path.Combine(localBox.Text,rootName);
-                Directory.CreateDirectory(destination);
-                 var files=new List<RemoteFile>();
-                await BuildManifestAsync(remoteRoot,"",destination,files,token);
-                totalBytes=files.Sum(f=>f.Size);
-                totalLabel.Text=files.Count+" files • "+FormatBytes(totalBytes);
-                if(files.Count==0){SetStatus("No readable files found in this folder.",true);return;}
-
-                int workers=(int)workersBox.Value;
-                long chunk=(long)chunkBox.Value*1024L*1024L;
-                var jobs=new ConcurrentQueue<ChunkJob>();
-                long alreadyDone=0;
-                foreach(var f in files)
-                {
-                    token.ThrowIfCancellationRequested();
-                    Directory.CreateDirectory(Path.GetDirectoryName(f.FinalPath));
-                    if(File.Exists(f.FinalPath) && new FileInfo(f.FinalPath).Length==f.Size)
-                    {
-                        alreadyDone+=f.Size; continue;
-                    }
-                    if(f.Size==0){File.WriteAllBytes(f.FinalPath,new byte[0]);continue;}
-                    try{if(File.Exists(f.PartPath))File.Delete(f.PartPath);}catch{}
-                    using(var fs=new FileStream(f.PartPath,FileMode.Create,FileAccess.Write,FileShare.ReadWrite)){fs.SetLength(f.Size);}
-                    int count=(int)Math.Ceiling(f.Size/(double)chunk); f.RemainingChunks=count;
-                    for(long st=0;st<f.Size;st+=chunk) jobs.Enqueue(new ChunkJob{File=f,Start=st,End=Math.Min(f.Size-1,st+chunk-1)});
                 }
+                        }
+                    }
+                    catch
+                    {
+                        partial=0;
+                    }
+
+                    alreadyDone+=partial;
+                    jobs.Enqueue(f);
+                }
+
                 Interlocked.Exchange(ref completedBytes,alreadyDone);
-                if(jobs.IsEmpty){SetStatus("Everything is already present at the destination.",false);progress.Value=1000;return;}
-                SetStatus("Turbo transfer running — "+workers+" parallel workers, "+chunkBox.Value+" MB ranges.",false);
+                if(jobs.IsEmpty)
+                {
+                    SetStatus("Everything is already present at the destination.",false);
+                    progress.Value=1000;
+                    return;
+                }
+
+                SetStatus("Turbo v1.4 running — "+workers+" sequential file streams. No random chunk writes.",false);
 
                 var errors=new ConcurrentQueue<string>();
                 var tasks=new List<Task>();
-                for(int i=0;i<workers;i++) tasks.Add(Task.Run(async()=>{
-                    ChunkJob job;
-                    while(!token.IsCancellationRequested && jobs.TryDequeue(out job))
-                    {
-                        bool ok=false; Exception last=null;
-                        for(int attempt=1;attempt<=3 && !ok && !token.IsCancellationRequested;attempt++)
+
+                for(int i=0;i<workers;i++)
+                {
+                    tasks.Add(Task.Run(async()=>{
+                        RemoteFile file;
+                        while(!token.IsCancellationRequested && jobs.TryDequeue(out file))
                         {
-                            try{await DownloadChunkAsync(job,token);ok=true;}catch(Exception ex){last=ex;Thread.Sleep(250*attempt);}
-                        }
-                        if(!ok){errors.Enqueue(job.File.RemotePath+" : "+(last==null?"transfer failed":last.Message)); continue;}
-                        if(Interlocked.Decrement(ref job.File.RemainingChunks)==0)
-                        {
+                            bool ok=false;
+                            Exception last=null;
+
+                            for(int attempt=1;attempt<=3 && !ok && !token.IsCancellationRequested;attempt++)
+                            {
+                                try
+                                {
+                                    await DownloadFileTurboAsync(file,token);
+                                    ok=true;
+                                }
+                                catch(Exception ex)
+                                {
+                                    last=ex;
+                                    await Task.Delay(350*attempt,token);
+                                }
+                            }
+
+                            if(!ok)
+                            {
+                                errors.Enqueue(file.RemotePath+" : "+(last==null?"transfer failed":last.Message));
+                                continue;
+                            }
+
                             try
                             {
-                                if(File.Exists(job.File.FinalPath))File.Delete(job.File.FinalPath);
-                                File.Move(job.File.PartPath,job.File.FinalPath);
-                                if(job.File.Modified>0)File.SetLastWriteTime(job.File.FinalPath,DateTimeOffset.FromUnixTimeMilliseconds(job.File.Modified).LocalDateTime);
-                            }catch(Exception ex){errors.Enqueue(job.File.RemotePath+" : "+ex.Message);}
+                                long got=File.Exists(file.PartPath)?new FileInfo(file.PartPath).Length:0;
+                                if(got!=file.Size)throw new IOException("Incomplete file "+got+"/"+file.Size);
+
+                                if(File.Exists(file.FinalPath))File.Delete(file.FinalPath);
+                                File.Move(file.PartPath,file.FinalPath);
+                                if(file.Modified>0)
+                                    File.SetLastWriteTime(file.FinalPath,DateTimeOffset.FromUnixTimeMilliseconds(file.Modified).LocalDateTime);
+                            }
+                            catch(Exception ex)
+                            {
+                                errors.Enqueue(file.RemotePath+" : "+ex.Message);
+                            }
                         }
-                    }
-                },token));
+                    },token));
+                }
+
                 await Task.WhenAll(tasks);
                 token.ThrowIfCancellationRequested();
-                progress.Value=1000; UpdateSpeed();
-                if(errors.IsEmpty) SetStatus("DONE — "+files.Count+" files copied to "+destination,false);
-                else SetStatus("Completed with "+errors.Count+" error(s). First
+                progress.Value=1000;
+                UpdateSpeed();
+
+                if(errors.IsEmpty)SetStatus("DONE — "+files.Count+" files copied to "+destination,false);
+                else SetStatus("Completed with "+errors.Count+" error(s). First: "+errors.FirstOrDefault(),true);
+            }
+            catch(OperationCanceledException)
+            {
+                SetStatus("Transfer cancelled. Partial files are kept and will resume next time.",true);
+            }
+            catch(Exception ex)
+            {
+                SetStatus("Transfer stopped: "+ex.Message,true);
+            }
+            finally
+            {
+                speedTimer.Stop();
+                if(transferWatch!=null)transferWatch.Stop();
+                cts.Dispose();
+                cts=null;
+                startBtn.Enabled=true;
+                cancelBtn.Enabled=false;
+                ToggleConnect(true);
+            }
+        }
+
+        async Task BuildManifestAsync(string remote,string rel,string destRoot,List<RemoteFile> files,CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            var list=await GetListAsync(remote,token);
+            foreach(var x in (list.items??new PhoneItem[0]))
+            {
+                token.ThrowIfCancellationRequested();
+                string safe=Sanitize(x.name);
+                string childRel=string.IsNullOrEmpty(rel)?safe:Path.Combine(rel,safe);
+                if(x.dir)
+                {
+                    Directory.CreateDirectory(Path.Combine(destRoot,childRel));
+                    await BuildManifestAsync(x.path,childRel,destRoot,files,token);
+                }
+                else
+                {
+                    var final=Path.Combine(destRoot,childRel);
+                    files.Add(new RemoteFile{
+                        RemotePath=x.path,
+                        RelativePath=childRel,
+                        Size=Math.Max(0,x.size),
+                        Modified=x.modified,
+                        FinalPath=final,
+                        PartPath=final+".flashdrop.part"
+                    });
+                }
+            }
+        }
+
+        int TurboPort
+        {
+            get { return 9091; }
+        }
+
+        string TurboHost
+        {
+            get { return new Uri(BaseUrl).Host; }
+        }
+
+        async Task<double> RunTurboBenchmarkAsync(long bytes,CancellationToken token)
+        {
+            var sw=Stopwatch.StartNew();
+            using(var client=new TcpClient())
+            {
+                client.NoDelay=true;
+                client.ReceiveBufferSize=4*1024*1024;
+                await client.ConnectAsync(TurboHost,TurboPort);
+                using(var ns=client.GetStream())
+                using(token.Register(()=>{try{client.Close();}catch{}}))
+                {
+                    byte[] hdr=Encoding.UTF8.GetBytes(
+                        "FLASHDROP/1\nPIN "+Pin+"\nMODE BENCH\nBYTES "+bytes+"\n\n");
+                    await ns.WriteAsync(hdr,0,hdr.Length,token);
+
+                    string line=await ReadAsciiLineAsync(ns,token);
+                    if(!line.StartsWith("OK "))throw new IOException("Turbo server: "+line);
+
+                    byte[] buf=new byte[1024*1024];
+                    long got=0;
+                    while(got<bytes)
+                    {
+                        i
