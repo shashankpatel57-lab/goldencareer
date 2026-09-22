@@ -98,7 +98,7 @@ public class MainActivity extends Activity {
         brand.setLetterSpacing(.16f);
         hero.addView(brand);
 
-        TextView title = text("Turbo 3 • Stable FTP Engine", 29, Color.WHITE, true);
+        TextView title = text("Turbo 3.1 • Persistent Stream", 29, Color.WHITE, true);
         title.setPadding(0, dp(7), 0, 0);
         hero.addView(title);
 
@@ -159,19 +159,19 @@ public class MainActivity extends Activity {
 
         LinearLayout turboCard = card(Color.rgb(248,247,255), Color.rgb(218,214,255));
         root.addView(turboCard);
-        turboCard.addView(text("⚡ FlashDrop Turbo 3 for Windows",20,Color.rgb(58,48,171),true));
-        TextView turboDesc=text("Turbo 3 no longer uses private HTTP transfer APIs. It uses the same read-only FTP engine that already works in Windows File Explorer, but runs multiple persistent workers with resume support for much higher and more stable throughput.",14,Color.rgb(70,78,103),false);
+        turboCard.addView(text("⚡ FlashDrop Turbo 3.1 for Windows",20,Color.rgb(58,48,171),true));
+        TextView turboDesc=text("Turbo 3.1 uses the same proven FTP port, then switches its workers into a persistent XFD1 streaming mode. File after file stays on the same socket, removing repeated passive-socket setup pauses while preserving resume support.",14,Color.rgb(70,78,103),false);
         turboDesc.setPadding(0,dp(8),0,0); turboCard.addView(turboDesc);
         TextView target=chip("TARGET: 100 GB/hour ≈ 28 MB/s sustained",Color.rgb(235,250,246),Color.rgb(4,128,99));
         addTopGap(turboCard,target,12);
-        TextView steps=text("1. Connect PC to this phone's 5 GHz hotspot.\n2. Start FlashDrop.\n3. Open the HTTP address above only to download Turbo 3.\n4. Run Turbo 3 → Auto Detect. No Turbo PIN is required.\n5. Choose the phone folder + PC folder → START TURBO COPY.",14,Color.rgb(50,61,85),false);
+        TextView steps=text("1. Connect PC to this phone's 5 GHz hotspot.\n2. Start FlashDrop.\n3. Open the HTTP address above only to download Turbo 3.\n4. Run Turbo 3.1 → Auto Detect. No Turbo PIN is required.\n5. Choose the phone folder + PC folder → START TURBO COPY.",14,Color.rgb(50,61,85),false);
         steps.setPadding(0,dp(12),0,0); turboCard.addView(steps);
 
         TextView expTitle=sectionTitle("Simple Explorer mode");
         addTopGap(root,expTitle,22);
         LinearLayout expCard=card(Color.rgb(246,252,250),Color.rgb(206,237,228)); root.addView(expCard);
         expCard.addView(text("📁 Copy folders directly in File Explorer",18,Color.rgb(10,105,85),true));
-        TextView exp=text("Open the FTP address above in Windows File Explorer. This remains the easiest method for normal copying. Turbo 3 uses this same proven FTP service with multiple persistent workers for large backups.",14,Color.rgb(56,76,72),false);
+        TextView exp=text("Open the FTP address above in Windows File Explorer. This remains the easiest method for normal copying. Turbo 3.1 upgrades this same FTP service with persistent file streams for large backups.",14,Color.rgb(56,76,72),false);
         exp.setPadding(0,dp(8),0,0); expCard.addView(exp);
 
         TextView setupTitle=sectionTitle("Connection & storage");
@@ -186,7 +186,7 @@ public class MainActivity extends Activity {
         LinearLayout perf=card(Color.rgb(250,251,255),Color.rgb(229,232,244));
         LinearLayout.LayoutParams pp=new LinearLayout.LayoutParams(-1,-2); pp.topMargin=dp(14); root.addView(perf,pp);
         perf.addView(text("Performance profile",16,Color.rgb(34,47,75),true));
-        TextView perfText=text("• Turbo 3 uses FTP only for transfer — no HTTP API endpoints\n• 1–8 persistent parallel workers\n• 1–8 MB sequential buffers\n• 4 MB Android file buffers + high-performance Wi-Fi lock\n• REST resume for interrupted files\n• Read-only FTP server for safety",13,Color.rgb(74,84,103),false);
+        TextView perfText=text("• Turbo 3.1 stays on the proven FTP control port\n• XFD1 persistent stream mode removes per-file data-socket reconnects\n• 1–8 persistent parallel workers\n• 1–8 MB sequential buffers\n• 4 MB Android file buffers + high-performance Wi-Fi lock\n• Automatic reconnect/resume on interruption\n• Standard read-only FTP remains available for Explorer",13,Color.rgb(74,84,103),false);
         perfText.setPadding(0,dp(8),0,0); perf.addView(perfText);
 
         TextView limit=text("Actual speed depends on the phone's Wi-Fi chipset, hotspot link rate, storage read speed, laptop Wi-Fi, interference and file sizes. 100 GB/hour needs roughly 28 MB/s continuously, so it is a performance target rather than a guaranteed minimum.",12,Color.rgb(118,126,143),false);
