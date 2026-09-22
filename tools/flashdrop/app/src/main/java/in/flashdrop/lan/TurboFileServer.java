@@ -38,21 +38,12 @@ public class TurboFileServer {
     }
 
     public void start() throws IOException {
-        IOException last = null;
-        for (int p = DEFAULT_PORT; p <= DEFAULT_PORT + 9; p++) {
-            try {
-                ServerSocketChannel sc = ServerSocketChannel.open();
-                sc.configureBlocking(true);
-                sc.socket().setReuseAddress(true);
-                sc.socket().bind(new InetSocketAddress("0.0.0.0", p), 64);
-                server = sc;
-                port = p;
-                break;
-            } catch (IOException e) {
-                last = e;
-            }
-        }
-        if (server == null) throw last == null ? new IOException("No free Turbo port") : last;
+        ServerSocketChannel sc = ServerSocketChannel.open();
+        sc.configureBlocking(true);
+        sc.socket().setReuseAddress(true);
+        sc.socket().bind(new InetSocketAddress("0.0.0.0", DEFAULT_PORT), 64);
+        server = sc;
+        port = DEFAULT_PORT;
 
         pool = new ThreadPoolExecutor(
                 2, 16, 60L, TimeUnit.SECONDS,
