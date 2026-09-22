@@ -1,23 +1,4 @@
-
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,105));
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,88));
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,92));
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,20));
-            connectCard.Controls.Add(grid);
-
-            grid.Controls.Add(L("PHONE HTTP ADDRESS",8.5f,Muted,true),0,0);
-            grid.Controls.Add(L("6-DIGIT PIN",8.5f,Muted,true),1,0);
-            grid.Controls.Add(L("WORKERS",8.5f,Muted,true),4,0);
-            grid.Controls.Add(L("BUFFER MB",8.5f,Muted,true),5,0);
-
-            addressBox = Box();
-            addressBox.Text = "http://192.168.1.1:8080";
-            grid.Controls.Add(addressBox,0,1);
-
-            pinBox = Box();
-            pinBox.MaxLength = 6;
-            pinBox.TextAlign = HorizontalAlignment.Center;
-            pinBox.Font = new Font("Segoe UI",11f,FontStyle.Bold);
+ontStyle.Bold);
             pinBox.BackColor = Color.FromArgb(255,252,232);
             grid.Controls.Add(pinBox,1,1);
 
@@ -131,7 +112,7 @@
             destCard.Controls.Add(d);
 
             d.Controls.Add(L("DESTINATION ON THIS PC",9,Muted,true),0,0);
-            var turboNote=L("Unified Turbo • continuous HTTP bundle lanes • OnePlus optimized",8.8f,Muted,false);
+            var turboNote=L("Universal Turbo • auto-negotiates Bundle v2 / Bulk v1 / HTTP resume",8.8f,Muted,false);
             turboNote.Dock=DockStyle.Fill;
             turboNote.TextAlign=ContentAlignment.MiddleRight;
             d.SetColumnSpan(turboNote,4);
@@ -177,4 +158,49 @@
                 Dock=DockStyle.Fill,
                 Style=ProgressBarStyle.Continuous,
                 Maximum=1000,
-                
+                Margin=new Padding(0,3,0,5)
+            };
+            bottom.SetColumnSpan(progress,3);
+            bottom.Controls.Add(progress,0,0);
+
+            statusLabel=L("Ready. Universal Turbo v2.1 • cross-version compatible • OnePlus optimized.",9.5f,Muted,false);
+            statusLabel.Dock=DockStyle.Fill;
+            statusLabel.TextAlign=ContentAlignment.MiddleLeft;
+            statusLabel.AutoEllipsis=true;
+            bottom.Controls.Add(statusLabel,0,1);
+
+            speedLabel=L("0.0 MB/s",12,Blue,true);
+            speedLabel.Dock=DockStyle.Fill;
+            speedLabel.TextAlign=ContentAlignment.MiddleRight;
+            bottom.Controls.Add(speedLabel,1,1);
+
+            totalLabel=L("Waiting to transfer",9,Muted,false);
+            totalLabel.Dock=DockStyle.Fill;
+            totalLabel.TextAlign=ContentAlignment.MiddleRight;
+            totalLabel.AutoEllipsis=true;
+            bottom.Controls.Add(totalLabel,2,1);
+
+            speedTimer = new System.Windows.Forms.Timer { Interval=500 };
+            speedTimer.Tick += (s,e)=>UpdateSpeed();
+
+            ResumeLayout(true);
+        }
+
+        Panel Card()
+        {
+            return new Panel { Dock=DockStyle.Fill, BackColor=Color.White, Padding=new Padding(1), Margin=new Padding(0) };
+        }
+
+        Label L(string s, float size, Color color, bool bold)
+        {
+            return new Label { Text=s, ForeColor=color, Font=new Font("Segoe UI",size,bold?FontStyle.Bold:FontStyle.Regular), AutoSize=true, BackColor=Color.Transparent };
+        }
+
+        TextBox Box()
+        {
+            return new TextBox { Dock=DockStyle.Fill, BorderStyle=BorderStyle.FixedSingle, Font=new Font("Segoe UI",10f), Margin=new Padding(0,4,8,3), BackColor=Color.White, ForeColor=Ink };
+        }
+
+        Button Btn(string text, Color bg, Color fg)
+        {
+            var b = new Button { Te

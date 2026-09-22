@@ -1,116 +1,4 @@
-      return Math.Max(0,f.Size-partial);
-        }
-
-        async Task BuildManifestAsync(string remote,string rel,string destRoot,List<RemoteFile> files,CancellationToken token)
-        {
-            token.ThrowIfCancellationRequested();
-            var list=await GetListAsync(remote,token);
-
-            foreach(var x in (list.items??new PhoneItem[0]))
-            {
-                token.ThrowIfCancellationRequested();
-
-                string original=Sanitize(x.name);
-                string safe=CompactComponent(original,72);
-                string childRel=string.IsNullOrEmpty(rel)?safe:Path.Combine(rel,safe);
-
-                string candidate=Path.Combine(destRoot,childRel);
-
-                if(candidate.Length>205)
-                {
-                    string compact="_"+Hash8(x.path)+"_"+CompactComponent(original,44);
-                    childRel=Path.Combine("_LongPaths",compact);
-                    candidate=Path.Combine(destRoot,childRel);
-                }
-
-                if(candidate.Length>225)
-                {
-                    string compact="_"+Hash8(x.path)+"_"+CompactComponent(original,24);
-                    childRel=Path.Combine("_LP",compact);
-                    candidate=Path.Combine(destRoot,childRel);
-                }
-
-                if(x.dir)
-                {
-                    Directory.CreateDirectory(candidate);
-                    await BuildManifestAsync(x.path,childRel,destRoot,files,token);
-                }
-                else
-                {
-                    files.Add(new RemoteFile{
-                        RemotePath=x.path,
-                        RelativePath=childRel,
-                        Size=Math.Max(0,x.size),
-                        Modified=x.modified,
-                        FinalPath=candidate,
-                        PartPath=candidate+".flashdrop.part"
-                    });
-                }
-            }
-        }
-
-        static string CompactComponent(string name,int max)
-        {
-            if(string.IsNullOrEmpty(name))return "unnamed";
-            if(max<18)max=18;
-            if(name.Length<=max)return name;
-
-            string ext="";
-            string stem=name;
-
-            try
-            {
-                ext=Path.GetExtension(name);
-                if(ext.Length>12)ext="";
-                if(!string.IsNullOrEmpty(ext))stem=name.Substring(0,name.Length-ext.Length);
-            }
-            catch
-            {
-                ext="";
-                stem=name;
-            }
-
-            string hash=Hash8(name);
-            int keep=Math.Max(6,max-hash.Length-ext.Length-2);
-
-            if(stem.Length>keep)stem=stem.Substring(0,keep);
-
-            return stem+"_"+hash+ext;
-        }
-
-        static string Hash8(string s)
-        {
-            unchecked
-            {
-                uint h=2166136261;
-
-                foreach(char c in (s??""))
-                {
-                    h^=c;
-                    h*=16777619;
-                }
-
-                return h.ToString("x8");
-            }
-        }
-
-        async Task<double> RunHttpBenchmarkAsync(long bytes,CancellationToken token)
-        {
-            string url=BaseUrl+"/api/bench?pin="+Uri.EscapeDataString(Pin)+"&bytes="+bytes;
-            var req=(HttpWebRequest)WebRequest.Create(url);
-            req.Method="GET";
-            req.Proxy=null;
-            req.KeepAlive=true;
-            req.Timeout=15000;
-            req.ReadWriteTimeout=15000;
-
-            var sw=Stopwatch.StartNew();
-            long got=0;
-
-            using(token.Register(()=>{try{req.Abort();}catch{}}))
-            using(var res=(HttpWebResponse)await req.GetResponseAsync())
-            using(var input=res.GetResponseStream())
-            {
+ {
                 byte[] buf=new byte[1024*1024];
 
                 while(got<bytes)
@@ -191,38 +79,114 @@
             CancellationToken token,
             ConcurrentQueue<string> errors)
         {
+            bool done=false;
+            Exception last=null;
+
+            try
+            {
+                await DownloadBundleV2Async(files,token,errors);
+                done=true;
+            }
+            catch(WebException ex)
+            {
+                last=ex;
+                var r=ex.Response as HttpWebResponse;
+                if(r!=null && r.StatusCode!=HttpStatusCode.NotFound)throw;
+            }
+
+            if(done)return;
+
+            try
+            {
+                await DownloadBulkV1Async(files,token,errors);
+                done=true;
+            }
+            catch(WebException ex)
+            {
+                last=ex;
+                var r=ex.Response as HttpWebResponse;
+                if(r!=null && r.StatusCode!=HttpStatusCode.NotFound)throw;
+            }
+
+            if(done)return;
+
+            SetStatus("Older phone server detected — switching this lane to resumable HTTP file mode.",false);
+            await DownloadFilesHttpFallbackAsync(files,token,errors);
+        }
+
+        async Task DownloadBundleV2Async(
+            List<RemoteFile> files,
+            CancellationToken token,
+            ConcurrentQueue<string> errors)
+        {
             var sb=new StringBuilder(files.Count*128);
 
             for(int i=0;i<files.Count;i++)
             {
                 var f=files[i];
-                long offset=0;
-
-                try
-                {
-                    if(File.Exists(f.PartPath))
-                    {
-                        offset=new FileInfo(f.PartPath).Length;
-
-                        if(offset<0 || offset>f.Size)
-                        {
-                            File.Delete(f.PartPath);
-                            offset=0;
-                        }
-                    }
-                }
-                catch
-                {
-                    offset=0;
-                }
-
+                long offset=SafePartialLength(f);
                 string p64=Convert.ToBase64String(Encoding.UTF8.GetBytes(f.RemotePath??""));
                 sb.Append(i).Append('\t').Append(offset).Append('\t').Append(p64).Append('\n');
             }
 
             byte[] body=Encoding.UTF8.GetBytes(sb.ToString());
             string url=BaseUrl+"/api/bundle?pin="+Uri.EscapeDataString(Pin);
+            await ReadMultiFileHttpStreamAsync(url,body,files,token,errors,true);
+        }
 
+        async Task DownloadBulkV1Async(
+            List<RemoteFile> files,
+            CancellationToken token,
+            ConcurrentQueue<string> errors)
+        {
+            var sb=new StringBuilder(files.Count*128);
+
+            for(int i=0;i<files.Count;i++)
+            {
+                var f=files[i];
+                long offset=SafePartialLength(f);
+                string p64=Convert.ToBase64String(Encoding.UTF8.GetBytes(f.RemotePath??""));
+                sb.Append(i).Append('|').Append(offset).Append('|').Append(p64).Append('\n');
+            }
+
+            byte[] body=Encoding.UTF8.GetBytes(sb.ToString());
+            string url=BaseUrl+"/api/bulk?pin="+Uri.EscapeDataString(Pin);
+            await ReadMultiFileHttpStreamAsync(url,body,files,token,errors,false);
+        }
+
+        long SafePartialLength(RemoteFile f)
+        {
+            long offset=0;
+
+            try
+            {
+                if(File.Exists(f.PartPath))
+                {
+                    offset=new FileInfo(f.PartPath).Length;
+
+                    if(offset<0 || offset>f.Size)
+                    {
+                        File.Delete(f.PartPath);
+                        offset=0;
+                    }
+                }
+            }
+            catch
+            {
+                offset=0;
+            }
+
+            return offset;
+        }
+
+        async Task ReadMultiFileHttpStreamAsync(
+            string url,
+            byte[] body,
+            List<RemoteFile> files,
+            CancellationToken token,
+            ConcurrentQueue<string> errors,
+            bool tabs)
+        {
             var req=(HttpWebRequest)WebRequest.Create(url);
             req.Method="POST";
             req.ContentType="text/plain; charset=utf-8";
@@ -247,4 +211,63 @@
 
                         string line=await ReadAsciiLineWithTimeoutAsync(input,token,20000);
 
-                
+                        if(string.IsNullOrEmpty(line))
+                            throw new IOException("Transfer stream ended unexpectedly");
+
+                        if(line=="DONE")break;
+
+                        string[] p=tabs
+                            ? line.Split('\t')
+                            : line.Split(new[]{' '},StringSplitOptions.RemoveEmptyEntries);
+
+                        if(p.Length>=3 && p[0]=="ERR")
+                        {
+                            int bad;
+                            if(int.TryParse(p[1],out bad) && bad>=0 && bad<files.Count)
+                                errors.Enqueue(files[bad].RemotePath+" : "+p[2]);
+                            continue;
+                        }
+
+                        if(p.Length<4 || p[0]!="FILE")
+                            throw new IOException("Invalid Turbo frame: "+line);
+
+                        int index=int.Parse(p[1]);
+                        long remaining=long.Parse(p[2]);
+                        long size=long.Parse(p[3]);
+
+                        if(index<0 || index>=files.Count)
+                            throw new IOException("Invalid Turbo file index");
+
+                        await ReceiveOneFramedFileAsync(
+                            input,files[index],remaining,size,token);
+                    }
+                }
+            }
+        }
+
+        async Task ReceiveOneFramedFileAsync(
+            Stream input,
+            RemoteFile file,
+            long remaining,
+            long size,
+            CancellationToken token)
+        {
+            long offset=size-remaining;
+            int bufferBytes=(int)chunkBox.Value*1024*1024;
+            bufferBytes=Math.Max(512*1024,Math.Min(8*1024*1024,bufferBytes));
+            byte[] buf=new byte[bufferBytes];
+
+            Directory.CreateDirectory(Path.GetDirectoryName(file.FinalPath));
+
+            using(var fs=new FileStream(
+                file.PartPath,
+                FileMode.OpenOrCreate,
+                FileAccess.Write,
+                FileShare.Read,
+                bufferBytes,
+                FileOptions.SequentialScan | FileOptions.Asynchronous))
+            {
+                fs.Seek(offset,SeekOrigin.Begin);
+                if(fs.Length!=offset)fs.SetLength(offset);
+
+    

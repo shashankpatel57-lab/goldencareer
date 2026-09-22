@@ -1,96 +1,146 @@
-        if(string.IsNullOrEmpty(line))
-                            throw new IOException("Bundle stream ended unexpectedly");
+            long got=0;
 
-                        if(line=="DONE")break;
+                while(got<remaining)
+                {
+                    token.ThrowIfCancellationRequested();
 
-                        string[] p=line.Split('\t');
+                    int n=await ReadWithTimeoutAsync(
+                        input,buf,0,(int)Math.Min(buf.Length,remaining-got),token,20000);
 
-                        if(p.Length>=3 && p[0]=="ERR")
-                        {
-                            int bad;
-                            if(int.TryParse(p[1],out bad) && bad>=0 && bad<files.Count)
-                                errors.Enqueue(files[bad].RemotePath+" : "+p[2]);
+                    if(n<=0)
+                        throw new IOException("File stream ended early");
 
-                            continue;
-                        }
+                    await fs.WriteAsync(buf,0,n,token);
+                    got+=n;
+                    Interlocked.Add(ref completedBytes,n);
+                }
+            }
 
-                        if(p.Length<4 || p[0]!="FILE")
-                            throw new IOException("Invalid bundle frame: "+line);
+            FinalizePartFile(file);
+        }
 
-                        int index=int.Parse(p[1]);
-                        long remaining=long.Parse(p[2]);
-                        long size=long.Parse(p[3]);
+        async Task DownloadFilesHttpFallbackAsync(
+            List<RemoteFile> files,
+            CancellationToken token,
+            ConcurrentQueue<string> errors)
+        {
+            foreach(var file in files)
+            {
+                token.ThrowIfCancellationRequested();
 
-                        if(index<0 || index>=files.Count)
-                            throw new IOException("Invalid bundle file index");
+                if(File.Exists(file.FinalPath) && new FileInfo(file.FinalPath).Length==file.Size)
+                    continue;
 
-                        var file=files[index];
-                        long offset=size-remaining;
+                bool ok=false;
+                Exception last=null;
 
-                        int bufferBytes=(int)chunkBox.Value*1024*1024;
-                        bufferBytes=Math.Max(512*1024,Math.Min(8*1024*1024,bufferBytes));
-                        byte[] buf=new byte[bufferBytes];
-
-                        Directory.CreateDirectory(Path.GetDirectoryName(file.FinalPath));
-
-                        using(var fs=new FileStream(
-                            file.PartPath,
-                            FileMode.OpenOrCreate,
-                            FileAccess.Write,
-                            FileShare.Read,
-                            bufferBytes,
-                            FileOptions.SequentialScan | FileOptions.Asynchronous))
-                        {
-                            fs.Seek(offset,SeekOrigin.Begin);
-                            if(fs.Length!=offset)fs.SetLength(offset);
-
-                            long got=0;
-
-                            while(got<remaining)
-                            {
-                                token.ThrowIfCancellationRequested();
-
-                                int n=await ReadWithTimeoutAsync(
-                                    input,
-                                    buf,
-                                    0,
-                                    (int)Math.Min(buf.Length,remaining-got),
-                                    token,
-                                    20000);
-
-                                if(n<=0)
-                                    throw new IOException("Bundle file ended early");
-
-                                await fs.WriteAsync(buf,0,n,token);
-                                got+=n;
-                                Interlocked.Add(ref completedBytes,n);
-                            }
-                        }
-
-                        long localSize=File.Exists(file.PartPath)?new FileInfo(file.PartPath).Length:0;
-
-                        if(localSize!=file.Size)
-                            throw new IOException(
-                                "Incomplete local file "+localSize+"/"+file.Size+
-                                " for "+file.RemotePath);
-
-                        if(File.Exists(file.FinalPath))
-                            File.Delete(file.FinalPath);
-
-                        File.Move(file.PartPath,file.FinalPath);
-
-                        if(file.Modified>0)
-                        {
-                            try
-                            {
-                                File.SetLastWriteTime(
-                                    file.FinalPath,
-                                    DateTimeOffset.FromUnixTimeMilliseconds(file.Modified).LocalDateTime);
-                            }
-                            catch{}
-                        }
+                for(int attempt=1;attempt<=4 && !ok;attempt++)
+                {
+                    try
+                    {
+                        await DownloadSingleHttpFileAsync(file,token);
+                        ok=true;
+                    }
+                    catch(Exception ex)
+                    {
+                        last=ex;
+                        Thread.Sleep(200*attempt);
                     }
                 }
+
+                if(!ok)
+                    errors.Enqueue(file.RemotePath+" : "+(last==null?"HTTP fallback failed":last.Message));
+            }
+        }
+
+        async Task DownloadSingleHttpFileAsync(
+            RemoteFile file,
+            CancellationToken token)
+        {
+            long offset=SafePartialLength(file);
+            string url=BaseUrl+"/api/file?pin="+Uri.EscapeDataString(Pin)+
+                "&path="+Uri.EscapeDataString(file.RemotePath??"");
+
+            var req=(HttpWebRequest)WebRequest.Create(url);
+            req.Method="GET";
+            req.Proxy=null;
+            req.KeepAlive=true;
+            req.Timeout=30000;
+            req.ReadWriteTimeout=30000;
+
+            if(offset>0)
+                req.AddRange(offset);
+
+            using(token.Register(()=>{try{req.Abort();}catch{}}))
+            using(var res=(HttpWebResponse)await req.GetResponseAsync())
+            using(var input=res.GetResponseStream())
+            {
+                int bufferBytes=(int)chunkBox.Value*1024*1024;
+                bufferBytes=Math.Max(512*1024,Math.Min(8*1024*1024,bufferBytes));
+                byte[] buf=new byte[bufferBytes];
+
+                Directory.CreateDirectory(Path.GetDirectoryName(file.FinalPath));
+
+                using(var fs=new FileStream(
+                    file.PartPath,
+                    FileMode.OpenOrCreate,
+                    FileAccess.Write,
+                    FileShare.Read,
+                    bufferBytes,
+                    FileOptions.SequentialScan | FileOptions.Asynchronous))
+                {
+                    fs.Seek(offset,SeekOrigin.Begin);
+                    if(fs.Length!=offset)fs.SetLength(offset);
+
+                    long got=offset;
+
+                    while(got<file.Size)
+                    {
+                        token.ThrowIfCancellationRequested();
+
+                        int n=await ReadWithTimeoutAsync(
+                            input,buf,0,(int)Math.Min(buf.Length,file.Size-got),token,20000);
+
+                        if(n<=0)break;
+
+                        await fs.WriteAsync(buf,0,n,token);
+                        got+=n;
+                        Interlocked.Add(ref completedBytes,n);
+                    }
+
+                    if(got!=file.Size)
+                        throw new IOException("HTTP file incomplete "+got+"/"+file.Size);
+                }
+            }
+
+            FinalizePartFile(file);
+        }
+
+        void FinalizePartFile(RemoteFile file)
+        {
+            long localSize=File.Exists(file.PartPath)
+                ? new FileInfo(file.PartPath).Length
+                : 0;
+
+            if(localSize!=file.Size)
+                throw new IOException(
+                    "Incomplete local file "+localSize+"/"+file.Size+
+                    " for "+file.RemotePath);
+
+            if(File.Exists(file.FinalPath))
+                File.Delete(file.FinalPath);
+
+            File.Move(file.PartPath,file.FinalPath);
+
+            if(file.Modified>0)
+            {
+                try
+                {
+                    File.SetLastWriteTime(
+                        file.FinalPath,
+                        DateTimeOffset.FromUnixTimeMilliseconds(file.Modified).LocalDateTime);
+                }
+                catch{}
             }
         }
 

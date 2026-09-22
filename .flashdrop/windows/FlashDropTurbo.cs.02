@@ -1,49 +1,4 @@
-Margin=new Padding(0,3,0,5)
-            };
-            bottom.SetColumnSpan(progress,3);
-            bottom.Controls.Add(progress,0,0);
-
-            statusLabel=L("Ready. Unified Turbo v2.0 • one proven port • continuous multi-file streams.",9.5f,Muted,false);
-            statusLabel.Dock=DockStyle.Fill;
-            statusLabel.TextAlign=ContentAlignment.MiddleLeft;
-            statusLabel.AutoEllipsis=true;
-            bottom.Controls.Add(statusLabel,0,1);
-
-            speedLabel=L("0.0 MB/s",12,Blue,true);
-            speedLabel.Dock=DockStyle.Fill;
-            speedLabel.TextAlign=ContentAlignment.MiddleRight;
-            bottom.Controls.Add(speedLabel,1,1);
-
-            totalLabel=L("Waiting to transfer",9,Muted,false);
-            totalLabel.Dock=DockStyle.Fill;
-            totalLabel.TextAlign=ContentAlignment.MiddleRight;
-            totalLabel.AutoEllipsis=true;
-            bottom.Controls.Add(totalLabel,2,1);
-
-            speedTimer = new System.Windows.Forms.Timer { Interval=500 };
-            speedTimer.Tick += (s,e)=>UpdateSpeed();
-
-            ResumeLayout(true);
-        }
-
-        Panel Card()
-        {
-            return new Panel { Dock=DockStyle.Fill, BackColor=Color.White, Padding=new Padding(1), Margin=new Padding(0) };
-        }
-
-        Label L(string s, float size, Color color, bool bold)
-        {
-            return new Label { Text=s, ForeColor=color, Font=new Font("Segoe UI",size,bold?FontStyle.Bold:FontStyle.Regular), AutoSize=true, BackColor=Color.Transparent };
-        }
-
-        TextBox Box()
-        {
-            return new TextBox { Dock=DockStyle.Fill, BorderStyle=BorderStyle.FixedSingle, Font=new Font("Segoe UI",10f), Margin=new Padding(0,4,8,3), BackColor=Color.White, ForeColor=Ink };
-        }
-
-        Button Btn(string text, Color bg, Color fg)
-        {
-            var b = new Button { Text=text, BackColor=bg, ForeColor=fg, FlatStyle=FlatStyle.Flat, Dock=DockStyle.Fill, Margin=new Padding(4,3,4,3), Font=new Font("Segoe UI",9.2f,FontStyle.Bold), Cursor=Cursors.Hand, UseVisualStyleBackColor=false };
+xt=text, BackColor=bg, ForeColor=fg, FlatStyle=FlatStyle.Flat, Dock=DockStyle.Fill, Margin=new Padding(4,3,4,3), Font=new Font("Segoe UI",9.2f,FontStyle.Bold), Cursor=Cursors.Hand, UseVisualStyleBackColor=false };
             b.FlatAppearance.BorderSize=0;
             return b;
         }
@@ -166,4 +121,69 @@ Margin=new Padding(0,3,0,5)
         {
             if(remoteList.SelectedItems.Count==0)return;
             var x=remoteList.SelectedItems[0].Tag as PhoneItem;
-           
+            if(x!=null && x.dir) await LoadFolderAsync(x.path);
+        }
+
+        async Task UpAsync()
+        {
+            if(string.IsNullOrEmpty(currentPath)){await LoadFolderAsync("");return;}
+            var p=currentPath.Replace('\\','/'); int i=p.LastIndexOf('/'); p=i<0?"":p.Substring(0,i); await LoadFolderAsync(p);
+        }
+
+        void ChooseFolder()
+        {
+            using(var f=new FolderBrowserDialog { Description="Choose where FlashDrop should save the phone folder", ShowNewFolderButton=true, SelectedPath=Directory.Exists(localBox.Text)?localBox.Text:"" })
+                if(f.ShowDialog(this)==DialogResult.OK)localBox.Text=f.SelectedPath;
+        }
+
+        void OpenDestination()
+        {
+            try{Directory.CreateDirectory(localBox.Text);Process.Start("explorer.exe",localBox.Text);}catch(Exception ex){SetStatus(ex.Message,true);}
+        }
+
+        async Task StartTransferAsync()
+        {
+            if(cts!=null)return;
+            if(Pin.Length!=6){SetStatus("Enter the PIN and connect first.",true);return;}
+            if(string.IsNullOrWhiteSpace(localBox.Text)){SetStatus("Choose a destination folder on the PC.",true);return;}
+
+            cts=new CancellationTokenSource();
+            var token=cts.Token;
+            startBtn.Enabled=false;
+            cancelBtn.Enabled=true;
+            ToggleConnect(false);
+            completedBytes=0;
+            totalBytes=0;
+            progress.Value=0;
+            transferWatch=null;
+            speedTimer.Stop();
+
+            try
+            {
+                SetStatus("Testing the same HTTP path used for browsing…",false);
+                double link=await RunHttpBenchmarkAsync(16L*1024L*1024L,token);
+                SetStatus("Unified LAN path: "+link.ToString("0.0")+" MB/s. Scanning selected phone folder…",false);
+
+                var remoteRoot=currentPath??"";
+                string rootName=string.IsNullOrEmpty(remoteRoot)?"PhoneBackup":Sanitize(RemoteLeaf(remoteRoot));
+                string destination=Path.Combine(localBox.Text,rootName);
+                Directory.CreateDirectory(destination);
+
+                var files=new List<RemoteFile>();
+                await BuildManifestAsync(remoteRoot,"",destination,files,token);
+                totalBytes=files.Sum(f=>f.Size);
+                totalLabel.Text=files.Count+" files • "+FormatBytes(totalBytes);
+
+                if(files.Count==0)
+                {
+                    SetStatus("No readable files found in this folder.",true);
+                    return;
+                }
+
+                long alreadyDone=0;
+                var pending=new List<RemoteFile>();
+
+                foreach(var f in files)
+                {
+                    token.ThrowIfCancellationRequested();
+                    Directory.Cre

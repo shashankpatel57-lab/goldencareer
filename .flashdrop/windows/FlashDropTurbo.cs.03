@@ -1,69 +1,4 @@
- if(x!=null && x.dir) await LoadFolderAsync(x.path);
-        }
-
-        async Task UpAsync()
-        {
-            if(string.IsNullOrEmpty(currentPath)){await LoadFolderAsync("");return;}
-            var p=currentPath.Replace('\\','/'); int i=p.LastIndexOf('/'); p=i<0?"":p.Substring(0,i); await LoadFolderAsync(p);
-        }
-
-        void ChooseFolder()
-        {
-            using(var f=new FolderBrowserDialog { Description="Choose where FlashDrop should save the phone folder", ShowNewFolderButton=true, SelectedPath=Directory.Exists(localBox.Text)?localBox.Text:"" })
-                if(f.ShowDialog(this)==DialogResult.OK)localBox.Text=f.SelectedPath;
-        }
-
-        void OpenDestination()
-        {
-            try{Directory.CreateDirectory(localBox.Text);Process.Start("explorer.exe",localBox.Text);}catch(Exception ex){SetStatus(ex.Message,true);}
-        }
-
-        async Task StartTransferAsync()
-        {
-            if(cts!=null)return;
-            if(Pin.Length!=6){SetStatus("Enter the PIN and connect first.",true);return;}
-            if(string.IsNullOrWhiteSpace(localBox.Text)){SetStatus("Choose a destination folder on the PC.",true);return;}
-
-            cts=new CancellationTokenSource();
-            var token=cts.Token;
-            startBtn.Enabled=false;
-            cancelBtn.Enabled=true;
-            ToggleConnect(false);
-            completedBytes=0;
-            totalBytes=0;
-            progress.Value=0;
-            transferWatch=null;
-            speedTimer.Stop();
-
-            try
-            {
-                SetStatus("Testing the same HTTP path used for browsing…",false);
-                double link=await RunHttpBenchmarkAsync(16L*1024L*1024L,token);
-                SetStatus("Unified LAN path: "+link.ToString("0.0")+" MB/s. Scanning selected phone folder…",false);
-
-                var remoteRoot=currentPath??"";
-                string rootName=string.IsNullOrEmpty(remoteRoot)?"PhoneBackup":Sanitize(RemoteLeaf(remoteRoot));
-                string destination=Path.Combine(localBox.Text,rootName);
-                Directory.CreateDirectory(destination);
-
-                var files=new List<RemoteFile>();
-                await BuildManifestAsync(remoteRoot,"",destination,files,token);
-                totalBytes=files.Sum(f=>f.Size);
-                totalLabel.Text=files.Count+" files • "+FormatBytes(totalBytes);
-
-                if(files.Count==0)
-                {
-                    SetStatus("No readable files found in this folder.",true);
-                    return;
-                }
-
-                long alreadyDone=0;
-                var pending=new List<RemoteFile>();
-
-                foreach(var f in files)
-                {
-                    token.ThrowIfCancellationRequested();
-                    Directory.CreateDirectory(Path.GetDirectoryName(f.FinalPath));
+ateDirectory(Path.GetDirectoryName(f.FinalPath));
 
                     if(File.Exists(f.FinalPath) && new FileInfo(f.FinalPath).Length==f.Size)
                     {
@@ -133,9 +68,9 @@
                 speedTimer.Start();
 
                 SetStatus(
-                    "Unified Turbo v2.0 running — "+laneCount+
-                    " continuous HTTP bundle lanes on "+new Uri(BaseUrl).Port+
-                    " • no per-file reconnects.",
+                    "Universal Turbo v2.1 running — "+laneCount+
+                    " adaptive HTTP lanes on "+new Uri(BaseUrl).Port+
+                    " • automatic protocol fallback.",
                     false);
 
                 var errors=new ConcurrentQueue<string>();
@@ -212,4 +147,116 @@
             }
             catch{}
 
-      
+            return Math.Max(0,f.Size-partial);
+        }
+
+        async Task BuildManifestAsync(string remote,string rel,string destRoot,List<RemoteFile> files,CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            var list=await GetListAsync(remote,token);
+
+            foreach(var x in (list.items??new PhoneItem[0]))
+            {
+                token.ThrowIfCancellationRequested();
+
+                string original=Sanitize(x.name);
+                string safe=CompactComponent(original,72);
+                string childRel=string.IsNullOrEmpty(rel)?safe:Path.Combine(rel,safe);
+
+                string candidate=Path.Combine(destRoot,childRel);
+
+                if(candidate.Length>205)
+                {
+                    string compact="_"+Hash8(x.path)+"_"+CompactComponent(original,44);
+                    childRel=Path.Combine("_LongPaths",compact);
+                    candidate=Path.Combine(destRoot,childRel);
+                }
+
+                if(candidate.Length>225)
+                {
+                    string compact="_"+Hash8(x.path)+"_"+CompactComponent(original,24);
+                    childRel=Path.Combine("_LP",compact);
+                    candidate=Path.Combine(destRoot,childRel);
+                }
+
+                if(x.dir)
+                {
+                    Directory.CreateDirectory(candidate);
+                    await BuildManifestAsync(x.path,childRel,destRoot,files,token);
+                }
+                else
+                {
+                    files.Add(new RemoteFile{
+                        RemotePath=x.path,
+                        RelativePath=childRel,
+                        Size=Math.Max(0,x.size),
+                        Modified=x.modified,
+                        FinalPath=candidate,
+                        PartPath=candidate+".flashdrop.part"
+                    });
+                }
+            }
+        }
+
+        static string CompactComponent(string name,int max)
+        {
+            if(string.IsNullOrEmpty(name))return "unnamed";
+            if(max<18)max=18;
+            if(name.Length<=max)return name;
+
+            string ext="";
+            string stem=name;
+
+            try
+            {
+                ext=Path.GetExtension(name);
+                if(ext.Length>12)ext="";
+                if(!string.IsNullOrEmpty(ext))stem=name.Substring(0,name.Length-ext.Length);
+            }
+            catch
+            {
+                ext="";
+                stem=name;
+            }
+
+            string hash=Hash8(name);
+            int keep=Math.Max(6,max-hash.Length-ext.Length-2);
+
+            if(stem.Length>keep)stem=stem.Substring(0,keep);
+
+            return stem+"_"+hash+ext;
+        }
+
+        static string Hash8(string s)
+        {
+            unchecked
+            {
+                uint h=2166136261;
+
+                foreach(char c in (s??""))
+                {
+                    h^=c;
+                    h*=16777619;
+                }
+
+                return h.ToString("x8");
+            }
+        }
+
+        async Task<double> RunHttpBenchmarkAsync(long bytes,CancellationToken token)
+        {
+            string url=BaseUrl+"/api/bench?pin="+Uri.EscapeDataString(Pin)+"&bytes="+bytes;
+            var req=(HttpWebRequest)WebRequest.Create(url);
+            req.Method="GET";
+            req.Proxy=null;
+            req.KeepAlive=true;
+            req.Timeout=15000;
+            req.ReadWriteTimeout=15000;
+
+            var sw=Stopwatch.StartNew();
+            long got=0;
+
+            using(token.Register(()=>{try{req.Abort();}catch{}}))
+            using(var res=(HttpWebResponse)await req.GetResponseAsync())
+            using(var input=res.GetResponseStream())
+           
