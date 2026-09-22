@@ -1,0 +1,77 @@
+              files.Add(new RemoteFile{RemotePath=x.path,RelativePath=childRel,Size=Math.Max(0,x.size),Modified=x.modified,FinalPath=final,PartPath=final+".flashdrop.part"});
+                }
+            }
+        }
+
+        async Task DownloadChunkAsync(ChunkJob job,CancellationToken token)
+        {
+            string url=BaseUrl+"/download?pin="+Uri.EscapeDataString(Pin)+"&path="+Uri.EscapeDataString(job.File.RemotePath);
+            var req=(HttpWebRequest)WebRequest.Create(url); req.Method="GET"; req.Proxy=null; req.KeepAlive=true; req.Timeout=30000; req.ReadWriteTimeout=30000; req.AddRange(job.Start,job.End);
+            var sp=req.ServicePoint; sp.ConnectionLimit=64; sp.UseNagleAlgorithm=false; sp.Expect100Continue=false;
+            using(token.Register(()=>{try{req.Abort();}catch{}}))
+            using(var res=(HttpWebResponse)await req.GetResponseAsync())
+            using(var input=res.GetResponseStream())
+            using(var fs=new FileStream(job.File.PartPath,FileMode.Open,FileAccess.Write,FileShare.ReadWrite,1024*1024,FileOptions.RandomAccess))
+            {
+                fs.Seek(job.Start,SeekOrigin.Begin);
+                byte[] buf=new byte[1024*1024]; long need=job.End-job.Start+1, got=0;
+                while(got<need)
+                {
+                    token.ThrowIfCancellationRequested();
+                    int n=await input.ReadAsync(buf,0,(int)Math.Min(buf.Length,need-got)); if(n<=0)break;
+                    await fs.WriteAsync(buf,0,n); got+=n; Interlocked.Add(ref completedBytes,n);
+                }
+                if(got!=need)throw new IOException("Short read "+got+"/"+need);
+            }
+        }
+
+        void UpdateSpeed()
+        {
+            if(transferWatch==null)return;
+            long done=Interlocked.Read(ref completedBytes); double sec=Math.Max(.001,transferWatch.Elapsed.TotalSeconds); double mbps=done/1048576d/sec;
+            speedLabel.Text=mbps.ToString("0.0")+" MB/s";
+            if(totalBytes>0)
+            {
+                int v=(int)Math.Max(0,Math.Min(1000,done*1000d/totalBytes)); progress.Value=v;
+                double remaining=Math.Max(0,totalBytes-done); double eta=mbps>0.1?remaining/1048576d/mbps:0;
+                totalLabel.Text=FormatBytes(done)+" / "+FormatBytes(totalBytes)+(eta>0?" • ETA "+TimeSpan.FromSeconds(eta).ToString(eta>=3600?@"h\:mm\:ss":@"m\:ss"):"");
+            }
+        }
+
+        void ToggleConnect(bool enabled)
+        {
+            detectBtn.Enabled=enabled; connectBtn.Enabled=enabled; upBtn.Enabled=enabled; refreshBtn.Enabled=enabled;
+        }
+
+        string WebMessage(WebException ex)
+        {
+            try
+            {
+                var r=ex.Response as HttpWebResponse;
+                if(r!=null && r.StatusCode==HttpStatusCode.Forbidden)return "Wrong PIN. Check the FlashDrop app on the phone.";
+            }catch{}
+            return "Cannot reach phone: "+ex.Message;
+        }
+        void SetStatus(string s,bool error)
+        {
+            if(InvokeRequired){BeginInvoke((Action)(()=>SetStatus(s,error)));return;}
+            statusLabel.Text=s; statusLabel.ForeColor=error?Color.FromArgb(185,55,55):Muted;
+        }
+        static string RemoteLeaf(string p)
+        {
+            var x=(p??"").TrimEnd('/').Replace('\','/'); int i=x.LastIndexOf('/'); return i>=0?x.Substring(i+1):x;
+        }
+        static string Sanitize(string name)
+        {
+            if(string.IsNullOrWhiteSpace(name))return "unnamed";
+            char[] bad=Path.GetInvalidFileNameChars(); var a=name.Select(c=>bad.Contains(c)?'_':c).ToArray(); string s=new string(a).Trim().TrimEnd('.');
+            if(string.IsNullOrEmpty(s))s="unnamed";
+            string u=s.ToUpperInvariant(); string[] r={"CON","PRN","AUX","NUL","COM1","COM2","COM3","COM4","COM5","COM6","COM7","COM8","COM9","LPT1","LPT2","LPT3","LPT4","LPT5","LPT6","LPT7","LPT8","LPT9"};
+            if(r.Contains(u))s+="_"; return s;
+        }
+        static string FormatBytes(long b)
+        {
+            string[] u={"B","KB","MB","GB","TB"}; double v=b; int i=0; while(v>=1024&&i<u.Length-1){v/=1024;i++;} return (i==0?v.ToString("0"):v.ToString(v<10?"0.0":"0"))+" "+u[i];
+        }
+    }
+}
