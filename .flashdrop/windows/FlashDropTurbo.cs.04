@@ -1,19 +1,4 @@
-ed;attempt++)
-                            {
-                                try
-                                {
-                                    await DownloadFileTurboAsync(file,token);
-                                    ok=true;
-                                }
-                                catch(Exception ex)
-                                {
-                                    last=ex;
-                                    Thread.Sleep(350*attempt);
-                                }
-                            }
-
-                            if(!ok)
-                            {
+                      {
                                 errors.Enqueue(file.RemotePath+" : "+(last==null?"transfer failed":last.Message));
                                 continue;
                             }
@@ -50,7 +35,7 @@ ed;attempt++)
             }
             catch(Exception ex)
             {
-                SetStatus("Transfer stopped: "+ex.Message+"  (v1.5 automatically handles long Windows paths.)",true);
+                SetStatus("Transfer stopped: "+ex.Message+"  Partial files are preserved for resume.",true);
             }
             finally
             {
@@ -174,4 +159,22 @@ ed;attempt++)
                         "FLASHDROP/1\nPIN "+Pin+"\nMODE BENCH\nBYTES "+bytes+"\n\n");
                     await ns.WriteAsync(hdr,0,hdr.Length,token);
 
-                    str
+                    string line=await ReadAsciiLineAsync(ns,token);
+                    if(!line.StartsWith("OK "))throw new IOException("Turbo server: "+line);
+
+                    byte[] buf=new byte[1024*1024];
+                    long got=0;
+                    while(got<bytes)
+                    {
+                        int n=await ReadWithTimeoutAsync(ns,buf,0,(int)Math.Min(buf.Length,bytes-got),token,12000);
+                        if(n<=0)break;
+                        got+=n;
+                    }
+                    if(got!=bytes)throw new IOException("Turbo benchmark short read");
+                }
+            }
+            sw.Stop();
+            return bytes/1048576d/Math.Max(.001,sw.Elapsed.TotalSeconds);
+        }
+
+        async Task DownloadFileTurboAsync(RemoteFile file,CancellationToken token

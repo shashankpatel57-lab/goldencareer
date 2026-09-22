@@ -1,22 +1,4 @@
-ing line=await ReadAsciiLineAsync(ns,token);
-                    if(!line.StartsWith("OK "))throw new IOException("Turbo server: "+line);
-
-                    byte[] buf=new byte[1024*1024];
-                    long got=0;
-                    while(got<bytes)
-                    {
-                        int n=await ns.ReadAsync(buf,0,(int)Math.Min(buf.Length,bytes-got),token);
-                        if(n<=0)break;
-                        got+=n;
-                    }
-                    if(got!=bytes)throw new IOException("Turbo benchmark short read");
-                }
-            }
-            sw.Stop();
-            return bytes/1048576d/Math.Max(.001,sw.Elapsed.TotalSeconds);
-        }
-
-        async Task DownloadFileTurboAsync(RemoteFile file,CancellationToken token)
+)
         {
             long offset=0;
             if(File.Exists(file.PartPath))
@@ -66,7 +48,7 @@ ing line=await ReadAsciiLineAsync(ns,token);
                         FileAccess.Write,
                         FileShare.Read,
                         bufferBytes,
-                        FileOptions.SequentialScan))
+                        FileOptions.SequentialScan | FileOptions.Asynchronous))
                     {
                         fs.Seek(offset,SeekOrigin.Begin);
                         if(fs.Length!=offset)fs.SetLength(offset);
@@ -75,17 +57,31 @@ ing line=await ReadAsciiLineAsync(ns,token);
                         while(got<remaining)
                         {
                             token.ThrowIfCancellationRequested();
-                            int n=await ns.ReadAsync(buf,0,(int)Math.Min(buf.Length,remaining-got),token);
+                            int n=await ReadWithTimeoutAsync(ns,buf,0,(int)Math.Min(buf.Length,remaining-got),token,12000);
                             if(n<=0)break;
                             await fs.WriteAsync(buf,0,n,token);
                             got+=n;
                             Interlocked.Add(ref completedBytes,n);
                         }
-                        await fs.FlushAsync(token);
                         if(got!=remaining)throw new IOException("Short read "+got+"/"+remaining);
                     }
                 }
             }
+        }
+
+        async Task<int> ReadWithTimeoutAsync(Stream input,byte[] buffer,int offset,int count,CancellationToken token,int timeoutMs)
+        {
+            var readTask=input.ReadAsync(buffer,offset,count,token);
+            var timeoutTask=Task.Delay(timeoutMs,token);
+            var finished=await Task.WhenAny(readTask,timeoutTask);
+
+            if(finished!=readTask)
+            {
+                token.ThrowIfCancellationRequested();
+                throw new IOException("No data received for "+(timeoutMs/1000)+" seconds; reconnecting and resuming.");
+            }
+
+            return await readTask;
         }
 
         async Task<string> ReadAsciiLineAsync(Stream input,CancellationToken token)
@@ -105,13 +101,30 @@ ing line=await ReadAsciiLineAsync(ns,token);
         void UpdateSpeed()
         {
             if(transferWatch==null)return;
-            long done=Interlocked.Read(ref completedBytes); double sec=Math.Max(.001,transferWatch.Elapsed.TotalSeconds); double mbps=done/1048576d/sec;
-            speedLabel.Text=mbps.ToString("0.0")+" MB/s";
+
+            long done=Interlocked.Read(ref completedBytes);
+            DateTime now=DateTime.UtcNow;
+            double dt=Math.Max(.001,(now-speedSampleAt).TotalSeconds);
+            long delta=Math.Max(0,done-speedSampleBytes);
+            double instant=delta/1048576d/dt;
+
+            if(smoothedMbps<=0)smoothedMbps=instant;
+            else smoothedMbps=(smoothedMbps*0.60)+(instant*0.40);
+
+            speedSampleBytes=done;
+            speedSampleAt=now;
+
+            speedLabel.Text=smoothedMbps.ToString("0.0")+" MB/s";
+
             if(totalBytes>0)
             {
-                int v=(int)Math.Max(0,Math.Min(1000,done*1000d/totalBytes)); progress.Value=v;
-                double remaining=Math.Max(0,totalBytes-done); double eta=mbps>0.1?remaining/1048576d/mbps:0;
-                totalLabel.Text=FormatBytes(done)+" / "+FormatBytes(totalBytes)+(eta>0?" • ETA "+TimeSpan.FromSeconds(eta).ToString(eta>=3600?@"h\:mm\:ss":@"m\:ss"):"");
+                int v=(int)Math.Max(0,Math.Min(1000,done*1000d/totalBytes));
+                progress.Value=v;
+
+                double remaining=Math.Max(0,totalBytes-done);
+                double eta=smoothedMbps>0.1?remaining/1048576d/smoothedMbps:0;
+                totalLabel.Text=FormatBytes(done)+" / "+FormatBytes(totalBytes)
+                    +(eta>0?" • ETA "+TimeSpan.FromSeconds(eta).ToString(eta>=3600?@"h\:mm\:ss":@"m\:ss"):"");
             }
         }
 

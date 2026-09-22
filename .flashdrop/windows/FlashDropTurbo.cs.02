@@ -1,10 +1,4 @@
-les.Add(new RowStyle(SizeType.Percent,100));
-            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
-            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,150));
-            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,235));
-            outer.Controls.Add(bottom,0,4);
-
-            progress = new ProgressBar {
+ogressBar {
                 Dock=DockStyle.Fill,
                 Style=ProgressBarStyle.Continuous,
                 Maximum=1000,
@@ -13,7 +7,7 @@ les.Add(new RowStyle(SizeType.Percent,100));
             bottom.SetColumnSpan(progress,3);
             bottom.Controls.Add(progress,0,0);
 
-            statusLabel=L("Ready. v1.4 uses sequential raw TCP streaming. 100 GB/hour needs 27.8 MB/s.",9.5f,Muted,false);
+            statusLabel=L("Ready. Stable Turbo v1.6 • auto-resume on stalls • live MB/s.",9.5f,Muted,false);
             statusLabel.Dock=DockStyle.Fill;
             statusLabel.TextAlign=ContentAlignment.MiddleLeft;
             statusLabel.AutoEllipsis=true;
@@ -139,4 +133,15 @@ les.Add(new RowStyle(SizeType.Percent,100));
                     li.SubItems.Add(x.dir?"Folder":"File");
                     li.SubItems.Add(x.dir?"—":FormatBytes(x.size));
                     li.SubItems.Add(x.modified>0?DateTimeOffset.FromUnixTimeMilliseconds(x.modified).LocalDateTime.ToString("g"):"—");
-                    if(x.dir){li.ForeColor=Color.FromArgb(32,74,156); li.Font=new Font(remoteList.Font,Fo
+                    if(x.dir){li.ForeColor=Color.FromArgb(32,74,156); li.Font=new Font(remoteList.Font,FontStyle.Bold);}
+                    remoteList.Items.Add(li);
+                }
+                connectionLabel.Text="Connected"; connectionLabel.ForeColor=Green;
+                SetStatus("Connected. Double-click a folder to open it; START TURBO COPY downloads the current folder tree.",false);
+            }
+            catch(WebException ex)
+            {
+                connectionLabel.Text="Connection failed"; connectionLabel.ForeColor=Color.Firebrick;
+                SetStatus(WebMessage(ex),true);
+            }
+            catch(Exception ex){SetStatus(ex.Message,true);

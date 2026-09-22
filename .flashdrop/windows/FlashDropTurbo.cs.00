@@ -94,12 +94,15 @@ namespace FlashDropTurbo
         CancellationTokenSource cts;
         long totalBytes, completedBytes;
         Stopwatch transferWatch;
+        long speedSampleBytes;
+        DateTime speedSampleAt;
+        double smoothedMbps;
         System.Windows.Forms.Timer speedTimer;
         readonly JavaScriptSerializer json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
 
         public MainForm()
         {
-            Text = "FlashDrop Turbo v1.5 - by Shashank Patel";
+            Text = "FlashDrop Turbo v1.6 - by Shashank Patel";
             StartPosition = FormStartPosition.CenterScreen;
             MinimumSize = new Size(1000, 720);
             Size = new Size(1180, 820);
@@ -180,4 +183,6 @@ namespace FlashDropTurbo
 
             pinBox = Box();
             pinBox.MaxLength = 6;
-            pinBox.TextAlign = HorizontalAlignm
+            pinBox.TextAlign = HorizontalAlignment.Center;
+            pinBox.Font = new Font("Segoe UI",11f,FontStyle.Bold);
+            pinBox.BackColor = Color.FromArgb(2
