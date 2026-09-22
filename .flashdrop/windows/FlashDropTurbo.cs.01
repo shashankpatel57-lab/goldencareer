@@ -1,46 +1,122 @@
-yles.Add(new ColumnStyle(SizeType.Percent, 36));
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100));
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 90));
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 115));
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 22));
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20));
+.Absolute,24));
+            grid.RowStyles.Add(new RowStyle(SizeType.Absolute,42));
+            grid.RowStyles.Add(new RowStyle(SizeType.Percent,100));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,38));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,100));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,105));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,105));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,88));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,92));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,20));
             connectCard.Controls.Add(grid);
-            grid.Controls.Add(L("Phone HTTP address", 9, Muted, true), 0, 0);
-            grid.Controls.Add(L("PIN", 9, Muted, true), 1, 0);
-            grid.Controls.Add(L("Workers", 9, Muted, true), 4, 0);
-            grid.Controls.Add(L("Chunk MB", 9, Muted, true), 5, 0);
-            addressBox = Box(); addressBox.Text = "http://192.168.1.1:8080"; grid.Controls.Add(addressBox, 0, 1);
-            pinBox = Box(); pinBox.MaxLength = 6; pinBox.TextAlign = HorizontalAlignment.Center; grid.Controls.Add(pinBox, 1, 1);
-            detectBtn = Btn("Auto Detect", Color.FromArgb(235, 239, 255), Blue); detectBtn.Click += async (s,e)=>await AutoDetectAsync(); grid.Controls.Add(detectBtn, 2, 1);
-            connectBtn = Btn("Connect", Blue, Color.White); connectBtn.Click += async (s,e)=>await LoadFolderAsync(currentPath); grid.Controls.Add(connectBtn, 3, 1);
-            workersBox = Num(2, 16, 8); grid.Controls.Add(workersBox, 4, 1);
-            chunkBox = Num(8, 256, 64); grid.Controls.Add(chunkBox, 5, 1);
-            connectionLabel = L("Waiting for phone…", 9.5f, Muted, true); connectionLabel.Dock = DockStyle.Fill; connectionLabel.TextAlign = ContentAlignment.MiddleLeft; grid.Controls.Add(connectionLabel, 6, 1);
-            root.Controls.Add(connectCard, 0, 0);
 
-            var browserCard = Card(); browserCard.Margin = new Padding(0, 14, 0, 0);
-            var browser = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
-            browser.RowStyles.Add(new RowStyle(SizeType.Absolute, 52)); browser.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); browserCard.Controls.Add(browser);
-            var nav = new Panel { Dock = DockStyle.Fill, BackColor = Color.White, Padding = new Padding(14, 8, 14, 6) };
+            grid.Controls.Add(L("PHONE HTTP ADDRESS",8.5f,Muted,true),0,0);
+            grid.Controls.Add(L("6-DIGIT PIN",8.5f,Muted,true),1,0);
+            grid.Controls.Add(L("WORKERS",8.5f,Muted,true),4,0);
+            grid.Controls.Add(L("CHUNK MB",8.5f,Muted,true),5,0);
+
+            addressBox = Box();
+            addressBox.Text = "http://192.168.1.1:8080";
+            grid.Controls.Add(addressBox,0,1);
+
+            pinBox = Box();
+            pinBox.MaxLength = 6;
+            pinBox.TextAlign = HorizontalAlignment.Center;
+            pinBox.Font = new Font("Segoe UI",11f,FontStyle.Bold);
+            pinBox.BackColor = Color.FromArgb(255,252,232);
+            grid.Controls.Add(pinBox,1,1);
+
+            detectBtn = Btn("AUTO DETECT", Color.FromArgb(232,237,255), Blue);
+            detectBtn.Click += async (s,e) => await AutoDetectAsync();
+            grid.Controls.Add(detectBtn,2,1);
+
+            connectBtn = Btn("CONNECT", Blue, Color.White);
+            connectBtn.Click += async (s,e) => await LoadFolderAsync(currentPath);
+            grid.Controls.Add(connectBtn,3,1);
+
+            workersBox = Num(2,16,8);
+            grid.Controls.Add(workersBox,4,1);
+
+            chunkBox = Num(8,256,64);
+            grid.Controls.Add(chunkBox,5,1);
+
+            connectionLabel = L("Waiting for phone...",9.5f,Muted,true);
+            connectionLabel.Dock = DockStyle.Fill;
+            connectionLabel.TextAlign = ContentAlignment.MiddleLeft;
+            grid.Controls.Add(connectionLabel,6,1);
+
+            var hint = L("1. Auto Detect   2. Enter PIN from phone   3. Connect   4. Choose phone folder and PC destination",9.2f,Color.FromArgb(75,87,112),false);
+            hint.Dock = DockStyle.Fill;
+            hint.TextAlign = ContentAlignment.MiddleLeft;
+            grid.SetColumnSpan(hint,7);
+            grid.Controls.Add(hint,0,2);
+
+            pinBox.KeyDown += async (s,e) => {
+                if(e.KeyCode==Keys.Enter) {
+                    e.SuppressKeyPress=true;
+                    await LoadFolderAsync(currentPath);
+                }
+            };
+
+            var browserCard = Card();
+            browserCard.Margin = new Padding(0,0,0,10);
+            outer.Controls.Add(browserCard,0,2);
+
+            var browser = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor=Color.White };
+            browser.RowStyles.Add(new RowStyle(SizeType.Absolute,52));
+            browser.RowStyles.Add(new RowStyle(SizeType.Percent,100));
+            browserCard.Controls.Add(browser);
+
+            var nav = new TableLayoutPanel {
+                Dock=DockStyle.Fill,
+                ColumnCount=4,
+                RowCount=1,
+                Padding=new Padding(12,8,12,6),
+                BackColor=Color.FromArgb(249,250,253)
+            };
+            nav.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,82));
+            nav.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,104));
+            nav.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
+            nav.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,165));
             browser.Controls.Add(nav,0,0);
-            upBtn = Btn("↑ Up", Color.FromArgb(241,244,250), Ink); upBtn.Location=new Point(12,9); upBtn.Size=new Size(72,34); upBtn.Click += async(s,e)=>await UpAsync(); nav.Controls.Add(upBtn);
-            refreshBtn = Btn("↻ Refresh", Color.FromArgb(241,244,250), Ink); refreshBtn.Location=new Point(92,9); refreshBtn.Size=new Size(90,34); refreshBtn.Click += async(s,e)=>await LoadFolderAsync(currentPath); nav.Controls.Add(refreshBtn);
-            pathLabel = L("Internal storage", 10, Ink, true); pathLabel.Location = new Point(198, 15); pathLabel.AutoSize=true; nav.Controls.Add(pathLabel);
-            remoteList = new ListView { Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, HideSelection = false, BorderStyle = BorderStyle.None, BackColor = Color.White };
-            remoteList.Columns.Add("Name", 480); remoteList.Columns.Add("Type", 100); remoteList.Columns.Add("Size", 120); remoteList.Columns.Add("Modified", 180);
-            remoteList.DoubleClick += async (s,e)=>await OpenSelectedAsync(); browser.Controls.Add(remoteList,0,1);
-            root.Controls.Add(browserCard, 0, 1);
 
-            var destCard = Card(); destCard.Height=102; destCard.Margin=new Padding(0,14,0,0);
-            var d = new TableLayoutPanel { Dock=DockStyle.Fill, ColumnCount=5, RowCount=2, Padding=new Padding(14,10,14,10) };
-            d.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100)); d.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,120)); d.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,120)); d.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,160)); d.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,120));
-            d.Controls.Add(L("Save current phone folder to",9,Muted,true),0,0);
-            localBox = Box(); localBox.Text = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "FlashDrop"); d.Controls.Add(localBox,0,1);
-            browseBtn=Btn("Choose Folder",Color.FromArgb(235,249,245),Green); browseBtn.Click+=(s,e)=>ChooseFolder(); d.Controls.Add(browseBtn,1,1);
-            openBtn=Btn("Open Folder",Color.FromArgb(241,244,250),Ink); openBtn.Click+=(s,e)=>OpenDestination(); d.Controls.Add(openBtn,2,1);
-            startBtn=Btn("START TURBO COPY",Green,Color.White); startBtn.Click+=async(s,e)=>await StartTransferAsync(); d.Controls.Add(startBtn,3,1);
-            cancelBtn=Btn("Cancel",Color.FromArgb(255,239,239),Color.FromArgb(180,50,50)); cancelBtn.Enabled=false; cancelBtn.Click+=(s,e)=>{ if(cts!=null) cts.Cancel(); }; d.Controls.Add(cancelBtn,4,1);
-            root.Controls.Add(destCard,0,2);
+            upBtn = Btn("UP",Color.FromArgb(240,244,250),Ink);
+            upBtn.Click += async(s,e) => await UpAsync();
+            nav.Controls.Add(upBtn,0,0);
 
-            var bottom = new Panel { Dock=DockStyle.Fill, Height=78, BackColor=Bg, Paddi
+            refreshBtn = Btn("REFRESH",Color.FromArgb(240,244,250),Ink);
+            refreshBtn.Click += async(s,e) => await LoadFolderAsync(currentPath);
+            nav.Controls.Add(refreshBtn,1,0);
+
+            pathLabel = L("Internal storage",10,Ink,true);
+            pathLabel.Dock=DockStyle.Fill;
+            pathLabel.TextAlign=ContentAlignment.MiddleLeft;
+            pathLabel.AutoEllipsis=true;
+            nav.Controls.Add(pathLabel,2,0);
+
+            var browseHint=L("Double-click folder to open",8.8f,Muted,false);
+            browseHint.Dock=DockStyle.Fill;
+            browseHint.TextAlign=ContentAlignment.MiddleRight;
+            nav.Controls.Add(browseHint,3,0);
+
+            remoteList = new ListView {
+                Dock = DockStyle.Fill,
+                View = View.Details,
+                FullRowSelect = true,
+                HideSelection = false,
+                BorderStyle = BorderStyle.None,
+                BackColor = Color.White,
+                Font = new Font("Segoe UI",9.5f)
+            };
+            remoteList.Columns.Add("Name",520);
+            remoteList.Columns.Add("Type",105);
+            remoteList.Columns.Add("Size",125);
+            remoteList.Columns.Add("Modified",180);
+            remoteList.DoubleClick += async (s,e) => await OpenSelectedAsync();
+            browser.Controls.Add(remoteList,0,1);
+
+            var destCard = Card();
+            destCard.Margin = new Padding(0,0,0,10);
+            outer.Controls.Add(destCard,0,3);
+
+            

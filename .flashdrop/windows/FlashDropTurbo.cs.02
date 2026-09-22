@@ -1,36 +1,119 @@
-ng=new Padding(2,12,2,0) };
-            progress = new ProgressBar { Location=new Point(2,12), Height=18, Anchor=AnchorStyles.Left|AnchorStyles.Right|AnchorStyles.Top, Width=1000, Style=ProgressBarStyle.Continuous, Maximum=1000 };
-            bottom.Controls.Add(progress);
-            statusLabel=L("Ready. 100 GB/hour needs about 28 MB/s sustained throughput.",9.5f,Muted,false); statusLabel.Location=new Point(2,38); statusLabel.AutoSize=true; bottom.Controls.Add(statusLabel);
-            speedLabel=L("0 MB/s",11,Blue,true); speedLabel.Anchor=AnchorStyles.Top|AnchorStyles.Right; speedLabel.AutoSize=true; speedLabel.Location=new Point(860,36); bottom.Controls.Add(speedLabel);
-            totalLabel=L("",9,Muted,false); totalLabel.Anchor=AnchorStyles.Top|AnchorStyles.Right; totalLabel.AutoSize=true; totalLabel.Location=new Point(860,56); bottom.Controls.Add(totalLabel);
-            bottom.Resize += (s,e)=> { progress.Width = Math.Max(300,bottom.ClientSize.Width-8); speedLabel.Left=Math.Max(650,bottom.ClientSize.Width-speedLabel.Width-8); totalLabel.Left=Math.Max(650,bottom.ClientSize.Width-totalLabel.Width-8); };
-            root.Controls.Add(bottom,0,3);
+var d = new TableLayoutPanel {
+                Dock=DockStyle.Fill,
+                ColumnCount=5,
+                RowCount=2,
+                Padding=new Padding(14,10,14,10),
+                BackColor=Color.White
+            };
+            d.RowStyles.Add(new RowStyle(SizeType.Absolute,28));
+            d.RowStyles.Add(new RowStyle(SizeType.Percent,100));
+            d.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
+            d.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,130));
+            d.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,125));
+            d.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,190));
+            d.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,115));
+            destCard.Controls.Add(d);
+
+            d.Controls.Add(L("DESTINATION ON THIS PC",9,Muted,true),0,0);
+            var turboNote=L("8 workers / 64 MB is a good starting point",8.8f,Muted,false);
+            turboNote.Dock=DockStyle.Fill;
+            turboNote.TextAlign=ContentAlignment.MiddleRight;
+            d.SetColumnSpan(turboNote,4);
+            d.Controls.Add(turboNote,1,0);
+
+            localBox = Box();
+            localBox.Text = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),"FlashDrop");
+            d.Controls.Add(localBox,0,1);
+
+            browseBtn=Btn("CHOOSE FOLDER",Color.FromArgb(229,248,241),Green);
+            browseBtn.Click+=(s,e)=>ChooseFolder();
+            d.Controls.Add(browseBtn,1,1);
+
+            openBtn=Btn("OPEN FOLDER",Color.FromArgb(240,244,250),Ink);
+            openBtn.Click+=(s,e)=>OpenDestination();
+            d.Controls.Add(openBtn,2,1);
+
+            startBtn=Btn("START TURBO COPY",Green,Color.White);
+            startBtn.Font=new Font("Segoe UI",10f,FontStyle.Bold);
+            startBtn.Click+=async(s,e)=>await StartTransferAsync();
+            d.Controls.Add(startBtn,3,1);
+
+            cancelBtn=Btn("CANCEL",Color.FromArgb(255,236,238),Color.FromArgb(185,45,55));
+            cancelBtn.Enabled=false;
+            cancelBtn.Click+=(s,e)=>{ if(cts!=null) cts.Cancel(); };
+            d.Controls.Add(cancelBtn,4,1);
+
+            var bottom = new TableLayoutPanel {
+                Dock=DockStyle.Fill,
+                ColumnCount=3,
+                RowCount=2,
+                Padding=new Padding(2,8,2,0),
+                BackColor=Bg
+            };
+            bottom.RowStyles.Add(new RowStyle(SizeType.Absolute,28));
+            bottom.RowStyles.Add(new RowStyle(SizeType.Percent,100));
+            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
+            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,150));
+            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,235));
+            outer.Controls.Add(bottom,0,4);
+
+            progress = new ProgressBar {
+                Dock=DockStyle.Fill,
+                Style=ProgressBarStyle.Continuous,
+                Maximum=1000,
+                Margin=new Padding(0,3,0,5)
+            };
+            bottom.SetColumnSpan(progress,3);
+            bottom.Controls.Add(progress,0,0);
+
+            statusLabel=L("Ready. 100 GB/hour requires about 27.8 MB/s sustained.",9.5f,Muted,false);
+            statusLabel.Dock=DockStyle.Fill;
+            statusLabel.TextAlign=ContentAlignment.MiddleLeft;
+            statusLabel.AutoEllipsis=true;
+            bottom.Controls.Add(statusLabel,0,1);
+
+            speedLabel=L("0.0 MB/s",12,Blue,true);
+            speedLabel.Dock=DockStyle.Fill;
+            speedLabel.TextAlign=ContentAlignment.MiddleRight;
+            bottom.Controls.Add(speedLabel,1,1);
+
+            totalLabel=L("Waiting to transfer",9,Muted,false);
+            totalLabel.Dock=DockStyle.Fill;
+            totalLabel.TextAlign=ContentAlignment.MiddleRight;
+            totalLabel.AutoEllipsis=true;
+            bottom.Controls.Add(totalLabel,2,1);
 
             speedTimer = new System.Windows.Forms.Timer { Interval=500 };
             speedTimer.Tick += (s,e)=>UpdateSpeed();
+
+            ResumeLayout(true);
         }
 
         Panel Card()
         {
             return new Panel { Dock=DockStyle.Fill, BackColor=Color.White, Padding=new Padding(1), Margin=new Padding(0) };
         }
+
         Label L(string s, float size, Color color, bool bold)
         {
-            return new Label { Text=s, ForeColor=color, Font=new Font("Segoe UI",size,bold?FontStyle.Bold:FontStyle.Regular), AutoSize=true };
+            return new Label { Text=s, ForeColor=color, Font=new Font("Segoe UI",size,bold?FontStyle.Bold:FontStyle.Regular), AutoSize=true, BackColor=Color.Transparent };
         }
+
         TextBox Box()
         {
-            return new TextBox { Dock=DockStyle.Fill, BorderStyle=BorderStyle.FixedSingle, Font=new Font("Segoe UI",10f), Margin=new Padding(0,4,8,0) };
+            return new TextBox { Dock=DockStyle.Fill, BorderStyle=BorderStyle.FixedSingle, Font=new Font("Segoe UI",10f), Margin=new Padding(0,4,8,3), BackColor=Color.White, ForeColor=Ink };
         }
+
         Button Btn(string text, Color bg, Color fg)
         {
-            var b = new Button { Text=text, BackColor=bg, ForeColor=fg, FlatStyle=FlatStyle.Flat, Dock=DockStyle.Fill, Margin=new Padding(4,2,4,0), Font=new Font("Segoe UI",9.2f,FontStyle.Bold), Cursor=Cursors.Hand };
-            b.FlatAppearance.BorderSize=0; return b;
+            var b = new Button { Text=text, BackColor=bg, ForeColor=fg, FlatStyle=FlatStyle.Flat, Dock=DockStyle.Fill, Margin=new Padding(4,3,4,3), Font=new Font("Segoe UI",9.2f,FontStyle.Bold), Cursor=Cursors.Hand, UseVisualStyleBackColor=false };
+            b.FlatAppearance.BorderSize=0;
+            return b;
         }
+
         NumericUpDown Num(decimal min, decimal max, decimal value)
         {
-            return new NumericUpDown { Minimum=min, Maximum=max, Value=value, Dock=DockStyle.Fill, Margin=new Padding(0,4,8,0), Font=new Font("Segoe UI",10f) };
+            return new NumericUpDown { Minimum=min, Maximum=max, Value=value, Dock=DockStyle.Fill, Margin=new Padding(0,4,8,3), Font=new Font("Segoe UI",10f), BackColor=Color.White, ForeColor=Ink };
         }
 
         string BaseUrl
@@ -38,52 +121,4 @@ ng=new Padding(2,12,2,0) };
             get
             {
                 var s=(addressBox.Text??"").Trim().TrimEnd('/');
-                if (!s.StartsWith("http://",StringComparison.OrdinalIgnoreCase) && !s.StartsWith("https://",StringComparison.OrdinalIgnoreCase)) s="http://"+s;
-                return s;
-            }
-        }
-        string Pin { get { return (pinBox.Text??"").Trim(); } }
-
-        async Task AutoDetectAsync()
-        {
-            SetStatus("Looking for FlashDrop on your current Wi‑Fi/hotspot…", false);
-            detectBtn.Enabled=false;
-            try
-            {
-                var gateways = NetworkInterface.GetAllNetworkInterfaces()
-                    .Where(n=>n.OperationalStatus==OperationalStatus.Up)
-                    .SelectMany(n=>n.GetIPProperties().GatewayAddresses)
-                    .Select(g=>g.Address)
-                    .Where(a=>a.AddressFamily==AddressFamily.InterNetwork && !IPAddress.IsLoopback(a))
-                    .Select(a=>a.ToString()).Distinct().ToList();
-                foreach(var ip in gateways)
-                {
-                    for(int p=8080;p<=8090;p++)
-                    {
-                        var u="http://"+ip+":"+p;
-                        if(await LooksLikeFlashDrop(u))
-                        {
-                            addressBox.Text=u;
-                            connectionLabel.Text="Phone found";
-                            connectionLabel.ForeColor=Green;
-                            SetStatus("Phone detected. Enter the 6‑digit PIN shown in FlashDrop, then click Connect.", false);
-                            return;
-                        }
-                    }
-                }
-                connectionLabel.Text="Not detected"; connectionLabel.ForeColor=Color.FromArgb(180,90,35);
-                SetStatus("Auto-detect did not find the phone. Enter the HTTP address shown in the Android app.", true);
-            }
-            catch(Exception ex){ SetStatus("Detection error: "+ex.Message,true); }
-            finally{ detectBtn.Enabled=true; }
-        }
-
-        async Task<bool> LooksLikeFlashDrop(string u)
-        {
-            return await Task.Run(()=>{
-                try
-                {
-                    var req=(HttpWebRequest)WebRequest.Create(u+"/"); req.Method="GET"; req.Timeout=450; req.ReadWriteTimeout=450; req.Proxy=null;
-                    using(var res=(HttpWebResponse)req.GetResponse()) using(var sr=new StreamReader(res.GetResponseStream()))
-                    {
-          
+                if (!s.Sta

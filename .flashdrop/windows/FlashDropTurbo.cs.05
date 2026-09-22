@@ -1,4 +1,30 @@
-              files.Add(new RemoteFile{RemotePath=x.path,RelativePath=childRel,Size=Math.Max(0,x.size),Modified=x.modified,FinalPath=final,PartPath=final+".flashdrop.part"});
+: "+errors.FirstOrDefault(),true);
+            }
+            catch(OperationCanceledException){SetStatus("Transfer cancelled. Partial .flashdrop.part files can be deleted safely.",true);}
+            catch(Exception ex){SetStatus("Transfer stopped: "+ex.Message,true);}
+            finally
+            {
+                speedTimer.Stop(); if(transferWatch!=null) transferWatch.Stop(); cts.Dispose(); cts=null; startBtn.Enabled=true; cancelBtn.Enabled=false; ToggleConnect(true);
+            }
+        }
+
+        async Task BuildManifestAsync(string remote,string rel,string destRoot,List<RemoteFile> files,CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            var list=await GetListAsync(remote,token);
+            foreach(var x in (list.items??new PhoneItem[0]))
+            {
+                token.ThrowIfCancellationRequested();
+                string safe=Sanitize(x.name); string childRel=string.IsNullOrEmpty(rel)?safe:Path.Combine(rel,safe);
+                if(x.dir)
+                {
+                    Directory.CreateDirectory(Path.Combine(destRoot,childRel));
+                    await BuildManifestAsync(x.path,childRel,destRoot,files,token);
+                }
+                else
+                {
+                    var final=Path.Combine(destRoot,childRel);
+                    files.Add(new RemoteFile{RemotePath=x.path,RelativePath=childRel,Size=Math.Max(0,x.size),Modified=x.modified,FinalPath=final,PartPath=final+".flashdrop.part"});
                 }
             }
         }

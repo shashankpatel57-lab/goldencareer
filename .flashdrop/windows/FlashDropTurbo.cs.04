@@ -1,4 +1,40 @@
-       var files=new List<RemoteFile>();
+m;
+            if(x!=null && x.dir) await LoadFolderAsync(x.path);
+        }
+
+        async Task UpAsync()
+        {
+            if(string.IsNullOrEmpty(currentPath)){await LoadFolderAsync("");return;}
+            var p=currentPath.Replace('\\','/'); int i=p.LastIndexOf('/'); p=i<0?"":p.Substring(0,i); await LoadFolderAsync(p);
+        }
+
+        void ChooseFolder()
+        {
+            using(var f=new FolderBrowserDialog { Description="Choose where FlashDrop should save the phone folder", ShowNewFolderButton=true, SelectedPath=Directory.Exists(localBox.Text)?localBox.Text:"" })
+                if(f.ShowDialog(this)==DialogResult.OK)localBox.Text=f.SelectedPath;
+        }
+
+        void OpenDestination()
+        {
+            try{Directory.CreateDirectory(localBox.Text);Process.Start("explorer.exe",localBox.Text);}catch(Exception ex){SetStatus(ex.Message,true);}
+        }
+
+        async Task StartTransferAsync()
+        {
+            if(cts!=null){return;}
+            if(Pin.Length!=6){SetStatus("Enter the PIN and connect first.",true);return;}
+            if(string.IsNullOrWhiteSpace(localBox.Text)){SetStatus("Choose a destination folder on the PC.",true);return;}
+            cts=new CancellationTokenSource(); var token=cts.Token;
+            startBtn.Enabled=false; cancelBtn.Enabled=true; ToggleConnect(false); completedBytes=0; totalBytes=0; progress.Value=0;
+            transferWatch=Stopwatch.StartNew(); speedTimer.Start();
+            try
+            {
+                SetStatus("Scanning the selected phone folder…",false);
+                var remoteRoot=currentPath??"";
+                string rootName=string.IsNullOrEmpty(remoteRoot)?"PhoneBackup":Sanitize(RemoteLeaf(remoteRoot));
+                string destination=Path.Combine(localBox.Text,rootName);
+                Directory.CreateDirectory(destination);
+                 var files=new List<RemoteFile>();
                 await BuildManifestAsync(remoteRoot,"",destination,files,token);
                 totalBytes=files.Sum(f=>f.Size);
                 totalLabel.Text=files.Count+" files • "+FormatBytes(totalBytes);
@@ -53,30 +89,4 @@
                 token.ThrowIfCancellationRequested();
                 progress.Value=1000; UpdateSpeed();
                 if(errors.IsEmpty) SetStatus("DONE — "+files.Count+" files copied to "+destination,false);
-                else SetStatus("Completed with "+errors.Count+" error(s). First: "+errors.FirstOrDefault(),true);
-            }
-            catch(OperationCanceledException){SetStatus("Transfer cancelled. Partial .flashdrop.part files can be deleted safely.",true);}
-            catch(Exception ex){SetStatus("Transfer stopped: "+ex.Message,true);}
-            finally
-            {
-                speedTimer.Stop(); if(transferWatch!=null) transferWatch.Stop(); cts.Dispose(); cts=null; startBtn.Enabled=true; cancelBtn.Enabled=false; ToggleConnect(true);
-            }
-        }
-
-        async Task BuildManifestAsync(string remote,string rel,string destRoot,List<RemoteFile> files,CancellationToken token)
-        {
-            token.ThrowIfCancellationRequested();
-            var list=await GetListAsync(remote,token);
-            foreach(var x in (list.items??new PhoneItem[0]))
-            {
-                token.ThrowIfCancellationRequested();
-                string safe=Sanitize(x.name); string childRel=string.IsNullOrEmpty(rel)?safe:Path.Combine(rel,safe);
-                if(x.dir)
-                {
-                    Directory.CreateDirectory(Path.Combine(destRoot,childRel));
-                    await BuildManifestAsync(x.path,childRel,destRoot,files,token);
-                }
-                else
-                {
-                    var final=Path.Combine(destRoot,childRel);
-      
+                else SetStatus("Completed with "+errors.Count+" error(s). First

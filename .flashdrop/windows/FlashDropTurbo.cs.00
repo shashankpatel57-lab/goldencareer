@@ -99,33 +99,62 @@ namespace FlashDropTurbo
 
         public MainForm()
         {
-            Text = "FlashDrop Turbo — by Shashank Patel";
+            Text = "FlashDrop Turbo v1.3 - by Shashank Patel";
             StartPosition = FormStartPosition.CenterScreen;
-            MinimumSize = new Size(940, 650);
-            Size = new Size(1120, 760);
+            MinimumSize = new Size(1000, 720);
+            Size = new Size(1180, 820);
             BackColor = Bg;
             Font = new Font("Segoe UI", 9.5f);
             Icon = SystemIcons.Shield;
+            AutoScaleMode = AutoScaleMode.Dpi;
+            FormBorderStyle = FormBorderStyle.Sizable;
+            MaximizeBox = true;
             BuildUi();
             Shown += async (s, e) => await AutoDetectAsync();
         }
 
         void BuildUi()
         {
-            var hero = new HeroPanel { Dock = DockStyle.Top, Height = 116, Padding = new Padding(28, 18, 28, 16) };
-            Controls.Add(hero);
-            var title = L("FLASHDROP TURBO", 23, Color.White, true); title.Location = new Point(28, 18); title.AutoSize = true; hero.Controls.Add(title);
-            var sub = L("Parallel 5 GHz phone → Windows transfer • no ZIP • no script", 11.5f, Color.FromArgb(235, 245, 255), false); sub.Location = new Point(30, 57); sub.AutoSize = true; hero.Controls.Add(sub);
-            var by = L("Designed & built by Shashank Patel", 9.5f, Color.FromArgb(225, 245, 240), true); by.Location = new Point(30, 82); by.AutoSize = true; hero.Controls.Add(by);
+            SuspendLayout();
 
-            var root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(22, 18, 22, 16), ColumnCount = 1, RowCount = 4, BackColor = Bg };
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            Controls.Add(root); root.BringToFront(); hero.BringToFront();
+            var outer = new TableLayoutPanel {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 5,
+                BackColor = Bg,
+                Padding = new Padding(18, 14, 18, 14)
+            };
+            outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 108));
+            outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 136));
+            outer.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 122));
+            outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 96));
+            Controls.Add(outer);
+
+            var hero = new HeroPanel { Dock = DockStyle.Fill, Margin = new Padding(0,0,0,10) };
+            outer.Controls.Add(hero,0,0);
+
+            var title = L("FLASHDROP TURBO", 23, Color.White, true);
+            title.Location = new Point(26, 16);
+            hero.Controls.Add(title);
+
+            var sub = L("High-speed parallel phone-to-PC transfer over your 5 GHz hotspot", 11.5f, Color.FromArgb(236,244,255), false);
+            sub.Location = new Point(28, 52);
+            hero.Controls.Add(sub);
+
+            var by = L("Designed & built by Shashank Patel", 9.5f, Color.FromArgb(225,249,242), true);
+            by.Location = new Point(28, 78);
+            hero.Controls.Add(by);
 
             var connectCard = Card();
-            connectCard.Height = 105;
-            var grid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 7, RowCount = 2, Padding = new Padding(14, 10, 14, 10) };
-            grid.ColumnSt
+            connectCard.Margin = new Padding(0,0,0,10);
+            outer.Controls.Add(connectCard,0,1);
+
+            var grid = new TableLayoutPanel {
+                Dock = DockStyle.Fill,
+                ColumnCount = 7,
+                RowCount = 3,
+                Padding = new Padding(14,10,14,10),
+                BackColor = Color.White
+            };
+            grid.RowStyles.Add(new RowStyle(SizeType
