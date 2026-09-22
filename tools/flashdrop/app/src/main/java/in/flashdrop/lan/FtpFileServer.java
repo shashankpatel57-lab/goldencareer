@@ -125,6 +125,7 @@ public class FtpFileServer {
                         writeRaw(out, " MDTM\r\n");
                         writeRaw(out, " REST STREAM\r\n");
                         writeRaw(out, " XFD1\r\n");
+                        writeRaw(out, " XFD2\r\n");
                         writeRaw(out, " XFD2 PACKED-FOLDER\r\n");
                         writeRaw(out, " MLST type*;size*;modify*;\r\n");
                         writeRaw(out, "211 End\r\n");
@@ -249,6 +250,10 @@ public class FtpFileServer {
                     }
                     case "XFD2":
                         handlePackedFolder(s, in, out, arg);
+                        return;
+                    case "XFD2":
+                        reply(out, 200, "XFD2 READY");
+                        handlePackedStream(s, in, out);
                         return;
                     case "XFD1":
                         reply(out, 200, "XFD1 READY");
@@ -475,6 +480,124 @@ public class FtpFileServer {
             return rel.replace(File.separatorChar, '/');
         } catch (Exception e) {
             return file.getName();
+        }
+    }
+
+    private void handlePackedStream(Socket socket, BufferedReader in, BufferedWriter controlOut) throws IOException {
+        OutputStream raw = socket.getOutputStream();
+        byte[] buf = new byte[4 * 1024 * 1024];
+
+        while (running) {
+            String line = in.readLine();
+            if (line == null) break;
+            line = line.trim();
+            if (line.isEmpty()) continue;
+
+            if ("QUIT".equalsIgnoreCase(line)) {
+                reply(controlOut, 221, "Goodbye");
+                break;
+            }
+
+            if ("PING".equalsIgnoreCase(line)) {
+                reply(controlOut, 200, "PONG");
+                continue;
+            }
+
+            if (!line.startsWith("BATCH ")) {
+                reply(controlOut, 500, "XFD2 expected BATCH");
+                continue;
+            }
+
+            int count;
+            try {
+                count = Integer.parseInt(line.substring(6).trim());
+            } catch (Exception e) {
+                reply(controlOut, 501, "Bad batch count");
+                continue;
+            }
+
+            if (count < 1 || count > 2000) {
+                reply(controlOut, 501, "Batch count out of range");
+                continue;
+            }
+
+            String[] paths = new String[count];
+            long[] offsets = new long[count];
+
+            boolean bad = false;
+
+            for (int i = 0; i < count; i++) {
+                String item = in.readLine();
+                if (item == null) throw new EOFException("Batch request ended early");
+
+                String[] p = item.split(" ", 2);
+                if (p.length != 2) {
+                    bad = true;
+                    break;
+                }
+
+                try {
+                    offsets[i] = Math.max(0L, Long.parseLong(p[0]));
+                    paths[i] = new String(
+                            android.util.Base64.decode(p[1], android.util.Base64.DEFAULT),
+                            StandardCharsets.UTF_8);
+                } catch (Exception e) {
+                    bad = true;
+                    break;
+                }
+            }
+
+            if (bad) {
+                reply(controlOut, 501, "Bad batch item");
+                continue;
+            }
+
+            reply(controlOut, 150, "BATCH " + count);
+
+            for (int i = 0; i < count && running; i++) {
+                File f = resolve(root, paths[i]);
+
+                if (f == null || !f.isFile() || !f.canRead()) {
+                    writeRaw(controlOut, "550 " + i + " 0 0\r\n");
+                    continue;
+                }
+
+                long total = f.length();
+                long offset = Math.min(offsets[i], total);
+                long length = total - offset;
+
+                writeRaw(controlOut, "151 " + i + " " + length + " " + total + "\r\n");
+
+                activeTransfers.incrementAndGet();
+                long sent = 0L;
+
+                try (RandomAccessFile raf = new RandomAccessFile(f, "r")) {
+                    raf.seek(offset);
+
+                    while (sent < length && running) {
+                        int n = raf.read(buf, 0, (int)Math.min((long)buf.length, length - sent));
+                        if (n < 0) break;
+                        if (n == 0) continue;
+
+                        raw.write(buf, 0, n);
+                        sent += n;
+                        bytesServed.addAndGet(n);
+                    }
+
+                    raw.flush();
+                } finally {
+                    activeTransfers.decrementAndGet();
+                }
+
+                if (sent != length) {
+                    try { writeRaw(controlOut, "426 " + i + " " + sent + "\r\n"); } catch (Exception ignored) {}
+                    throw new EOFException("Packed stream short send");
+                }
+
+                writeRaw(controlOut, "152 " + i + " " + sent + "\r\n");
+            }
+
+            writeRaw(controlOut, "226 BATCH DONE\r\n");
         }
     }
 
