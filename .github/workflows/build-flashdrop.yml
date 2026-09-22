@@ -1,4 +1,4 @@
-name: Build FlashDrop v1.5
+name: Build FlashDrop v1.6
 
 on:
   push:
@@ -53,7 +53,7 @@ jobs:
       - name: Checkout build branch
         uses: actions/checkout@v4
 
-      - name: Preserve v1.5 Android overlays
+      - name: Preserve v1.6 Android overlays
         shell: bash
         run: |
           mkdir -p /tmp/flashdrop-patch
@@ -69,7 +69,7 @@ jobs:
           echo "55354f1e7987b3051b2fcdba1985fb18ab7f2062820a90299222f236b3f7e1ab  /tmp/flashdrop-src.zip" | sha256sum -c -
           unzip -o /tmp/flashdrop-src.zip -d .
 
-      - name: Apply v1.5 Android overlays
+      - name: Apply v1.6 Android overlays
         shell: bash
         run: |
           cp /tmp/flashdrop-patch/FileServerService.java tools/flashdrop/app/src/main/java/in/flashdrop/lan/
@@ -77,8 +77,8 @@ jobs:
           cp /tmp/flashdrop-patch/FtpFileServer.java tools/flashdrop/app/src/main/java/in/flashdrop/lan/
           cp /tmp/flashdrop-patch/TurboFileServer.java tools/flashdrop/app/src/main/java/in/flashdrop/lan/
           cat .flashdrop/android/HttpFileServer.java.gz.b64.* | tr -d '\n\r ' | base64 -d | gzip -dc > tools/flashdrop/app/src/main/java/in/flashdrop/lan/HttpFileServer.java
-          sed -i "s/versionCode 1/versionCode 6/" tools/flashdrop/app/build.gradle
-          sed -i "s/versionName '1.0.0'/versionName '1.5.0'/" tools/flashdrop/app/build.gradle
+          sed -i "s/versionCode 1/versionCode 7/" tools/flashdrop/app/build.gradle
+          sed -i "s/versionName '1.0.0'/versionName '1.6.0'/" tools/flashdrop/app/build.gradle
           sed -i 's/android:label="FlashDrop LAN"/android:label="FlashDrop Direct"/' tools/flashdrop/app/src/main/AndroidManifest.xml
 
       - name: Download Windows Turbo helper into APK
@@ -112,13 +112,13 @@ jobs:
       - name: Stage APK
         shell: bash
         run: |
-          cp tools/flashdrop/app/build/outputs/apk/debug/app-debug.apk FlashDrop-Direct-v1.5.apk
-          sha256sum FlashDrop-Direct-v1.5.apk
+          cp tools/flashdrop/app/build/outputs/apk/debug/app-debug.apk FlashDrop-Direct-v1.6.apk
+          sha256sum FlashDrop-Direct-v1.6.apk
 
       - name: Upload Android APK
         uses: actions/upload-artifact@v4
         with:
-          name: FlashDrop-Direct-v1.5-APK
-          path: FlashDrop-Direct-v1.5.apk
+          name: FlashDrop-Direct-v1.6-APK
+          path: FlashDrop-Direct-v1.6.apk
           if-no-files-found: error
           retention-days: 7
