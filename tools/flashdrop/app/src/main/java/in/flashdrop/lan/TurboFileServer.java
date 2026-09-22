@@ -7,7 +7,6 @@ import java.nio.channels.FileChannel;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
-import java.util.Base64;
 import java.util.Locale;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -215,7 +214,7 @@ public class TurboFileServer {
                 case "PIN": q.pin = v; break;
                 case "MODE": q.mode = v.toUpperCase(Locale.US); break;
                 case "PATH":
-                    try { q.path = new String(Base64.getDecoder().decode(v), StandardCharsets.UTF_8); }
+                    try { q.path = new String(android.util.Base64.decode(v, android.util.Base64.DEFAULT), StandardCharsets.UTF_8); }
                     catch (Exception e) { q.path = null; }
                     break;
                 case "OFFSET":
