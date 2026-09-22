@@ -1,0 +1,96 @@
+               char[] b=new char[2048]; int n=sr.Read(b,0,b.Length); var s=new string(b,0,Math.Max(0,n));
+                        return s.IndexOf("FLASHDROP",StringComparison.OrdinalIgnoreCase)>=0;
+                    }
+                }catch{return false;}
+            });
+        }
+
+        async Task LoadFolderAsync(string path)
+        {
+            if(Pin.Length!=6){SetStatus("Enter the 6-digit PIN shown on the phone.",true); return;}
+            ToggleConnect(false);
+            try
+            {
+                var r=await GetListAsync(path,CancellationToken.None);
+                currentPath=r.path??path??"";
+                pathLabel.Text=string.IsNullOrEmpty(currentPath)?"Internal storage":"Internal storage / "+currentPath;
+                remoteList.Items.Clear();
+                foreach(var x in (r.items??new PhoneItem[0]))
+                {
+                    var li=new ListViewItem(x.name); li.Tag=x;
+                    li.SubItems.Add(x.dir?"Folder":"File");
+                    li.SubItems.Add(x.dir?"—":FormatBytes(x.size));
+                    li.SubItems.Add(x.modified>0?DateTimeOffset.FromUnixTimeMilliseconds(x.modified).LocalDateTime.ToString("g"):"—");
+                    if(x.dir){li.ForeColor=Color.FromArgb(32,74,156); li.Font=new Font(remoteList.Font,FontStyle.Bold);}
+                    remoteList.Items.Add(li);
+                }
+                connectionLabel.Text="Connected"; connectionLabel.ForeColor=Green;
+                SetStatus("Connected. Double-click a folder to open it; START TURBO COPY downloads the current folder tree.",false);
+            }
+            catch(WebException ex)
+            {
+                connectionLabel.Text="Connection failed"; connectionLabel.ForeColor=Color.Firebrick;
+                SetStatus(WebMessage(ex),true);
+            }
+            catch(Exception ex){SetStatus(ex.Message,true);} finally{ToggleConnect(true);}
+        }
+
+        async Task<ListResponse> GetListAsync(string path, CancellationToken token)
+        {
+            var url=BaseUrl+"/api/list?pin="+Uri.EscapeDataString(Pin)+"&path="+Uri.EscapeDataString(path??"");
+            string txt=await GetStringAsync(url,token);
+            var r=json.Deserialize<ListResponse>(txt);
+            if(r==null) throw new Exception("Invalid response from phone");
+            if(!string.IsNullOrEmpty(r.error)) throw new Exception(r.error);
+            return r;
+        }
+
+        async Task<string> GetStringAsync(string url, CancellationToken token)
+        {
+            return await Task.Run(()=>{
+                var req=(HttpWebRequest)WebRequest.Create(url); req.Method="GET"; req.Timeout=10000; req.ReadWriteTimeout=10000; req.Proxy=null; req.KeepAlive=true;
+                using(token.Register(()=>{try{req.Abort();}catch{}}))
+                using(var res=(HttpWebResponse)req.GetResponse()) using(var sr=new StreamReader(res.GetResponseStream(),Encoding.UTF8)) return sr.ReadToEnd();
+            },token);
+        }
+
+        async Task OpenSelectedAsync()
+        {
+            if(remoteList.SelectedItems.Count==0)return;
+            var x=remoteList.SelectedItems[0].Tag as PhoneItem;
+            if(x!=null && x.dir) await LoadFolderAsync(x.path);
+        }
+
+        async Task UpAsync()
+        {
+            if(string.IsNullOrEmpty(currentPath)){await LoadFolderAsync("");return;}
+            var p=currentPath.Replace('\','/'); int i=p.LastIndexOf('/'); p=i<0?"":p.Substring(0,i); await LoadFolderAsync(p);
+        }
+
+        void ChooseFolder()
+        {
+            using(var f=new FolderBrowserDialog { Description="Choose where FlashDrop should save the phone folder", ShowNewFolderButton=true, SelectedPath=Directory.Exists(localBox.Text)?localBox.Text:"" })
+                if(f.ShowDialog(this)==DialogResult.OK)localBox.Text=f.SelectedPath;
+        }
+
+        void OpenDestination()
+        {
+            try{Directory.CreateDirectory(localBox.Text);Process.Start("explorer.exe",localBox.Text);}catch(Exception ex){SetStatus(ex.Message,true);}
+        }
+
+        async Task StartTransferAsync()
+        {
+            if(cts!=null){return;}
+            if(Pin.Length!=6){SetStatus("Enter the PIN and connect first.",true);return;}
+            if(string.IsNullOrWhiteSpace(localBox.Text)){SetStatus("Choose a destination folder on the PC.",true);return;}
+            cts=new CancellationTokenSource(); var token=cts.Token;
+            startBtn.Enabled=false; cancelBtn.Enabled=true; ToggleConnect(false); completedBytes=0; totalBytes=0; progress.Value=0;
+            transferWatch=Stopwatch.StartNew(); speedTimer.Start();
+            try
+            {
+                SetStatus("Scanning the selected phone folder…",false);
+                var remoteRoot=currentPath??"";
+                string rootName=string.IsNullOrEmpty(remoteRoot)?"PhoneBackup":Sanitize(RemoteLeaf(remoteRoot));
+                string destination=Path.Combine(localBox.Text,rootName);
+                Directory.CreateDirectory(destination);
+          
