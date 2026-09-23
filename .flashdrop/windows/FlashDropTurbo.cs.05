@@ -1,4 +1,11 @@
-ists(f.FinalPath))
+Path,Expected Bytes,Actual Bytes,Details");
+
+                    foreach (var f in files)
+                    {
+                        long actual = 0;
+                        try
+                        {
+                            if (File.Exists(f.FinalPath))
                                 actual = new FileInfo(f.FinalPath).Length;
                             else if (File.Exists(f.PartPath))
                                 actual = new FileInfo(f.PartPath).Length;
@@ -21,6 +28,8 @@ ists(f.FinalPath))
                         sw.WriteLine(Csv("TRANSFER_ERROR") + "," + Csv(e) + ",,,,");
                     foreach (string e in verifyErrors)
                         sw.WriteLine(Csv("VERIFY_ERROR") + "," + Csv(e) + ",,,,");
+                    foreach (string e in skipped)
+                        sw.WriteLine(Csv("SKIPPED_SOURCE_CHANGED") + "," + Csv(e) + ",,,,");
                 }
             }
             catch { }
