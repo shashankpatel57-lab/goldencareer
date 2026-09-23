@@ -32,7 +32,7 @@ sync();
             d.Controls.Add(note, 1, 0);
 
             localBox = Box();
-            localBox.Text = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "BharatDrop");
+            localBox.Text = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "FileSetu");
             d.Controls.Add(localBox, 0, 1);
 
             browseBtn = Btn("CHOOSE FOLDER", Color.FromArgb(229, 248, 241), Green);
@@ -95,7 +95,7 @@ sync();
             bottom.SetColumnSpan(progress, 3);
             bottom.Controls.Add(progress, 0, 0);
 
-            statusLabel = LabelX("Ready. BharatDrop uses packed XFD2 streams with automatic reconnect/resume.", 9.5f, Muted, false);
+            statusLabel = LabelX("Ready. FileSetu uses packed XFD2 streams with automatic reconnect/resume.", 9.5f, Muted, false);
             statusLabel.Dock = DockStyle.Fill;
             statusLabel.TextAlign = ContentAlignment.MiddleLeft;
             statusLabel.AutoEllipsis = true;
@@ -119,7 +119,7 @@ sync();
         async Task AutoDetectAsync()
         {
             detectBtn.Enabled = false;
-            SetStatus("Detecting BharatDrop FTP on the hotspot...", false);
+            SetStatus("Detecting FileSetu FTP on the hotspot...", false);
 
             try
             {
@@ -181,7 +181,7 @@ sync();
                 }
                 else
                 {
-                    SetStatus("BharatDrop found at " + found, false);
+                    SetStatus("FileSetu found at " + found, false);
                     await LoadFolderAsync("/");
                 }
             }
