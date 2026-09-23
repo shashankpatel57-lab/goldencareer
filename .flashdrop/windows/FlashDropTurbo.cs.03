@@ -1,7 +1,4 @@
-sync();
-            browser.Controls.Add(remoteList, 0, 1);
-
-            var destCard = Card();
+ = Card();
             destCard.Margin = new Padding(0, 0, 0, 10);
             outer.Controls.Add(destCard, 0, 3);
 
@@ -359,4 +356,17 @@ sync();
                 var pending = new List<RemoteFile>();
                 long already = 0;
 
-                foreach (var f in f
+                foreach (var f in files)
+                {
+                    token.ThrowIfCancellationRequested();
+                    Directory.CreateDirectory(Path.GetDirectoryName(f.FinalPath));
+
+                    if (f.Size == 0)
+                    {
+                        if (!File.Exists(f.FinalPath))
+                            File.WriteAllBytes(f.FinalPath, new byte[0]);
+                        continue;
+                    }
+
+                    if (File.Exists(f.FinalPath) &&
+                     
