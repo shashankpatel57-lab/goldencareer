@@ -58,7 +58,7 @@ iles)
                     lanes[i % workers].Add(pending[i]);
 
                 SetStatus(
-                    "BharatDrop v5 running — " + workers +
+                    "FileSetu v5 running — " + workers +
                     " packed lanes • automatic reconnect/resume • pause supported.",
                     false);
 
@@ -350,7 +350,7 @@ iles)
             {
                 string report = Path.Combine(
                     destRoot,
-                    "BharatDrop_Transfer_Report_" +
+                    "FileSetu_Transfer_Report_" +
                     DateTime.Now.ToString("yyyyMMdd_HHmmss") +
                     ".csv");
 
