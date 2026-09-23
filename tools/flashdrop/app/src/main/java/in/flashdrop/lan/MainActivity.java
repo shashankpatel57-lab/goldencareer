@@ -204,7 +204,7 @@ public class MainActivity extends Activity {
         card.addView(pinText);
 
         TextView pinHint = text(
-                "Enter this PIN in FileSetu Desktop on your Windows PC.",
+                "Enter this PIN in FileSetu Desktop. It remains unchanged for the entire session and changes only after you stop FileSetu.",
                 12,
                 Color.rgb(103, 112, 128),
                 false);
