@@ -214,7 +214,7 @@
 
         public MainForm()
         {
-            Text = "BharatDrop Desktop v5.0 - by Shashank Patel";
+            Text = "FileSetu Desktop v5.2 - by Shashank Patel";
             StartPosition = FormStartPosition.CenterScreen;
             MinimumSize = new Size(1000, 720);
             Size = new Size(1180, 820);
@@ -316,7 +316,7 @@
             connectionLabel.TextAlign = ContentAlignment.MiddleLeft;
             g.Controls.Add(connectionLabel, 6, 1);
 
-            var hint = LabelX("Enter the 6-digit PIN shown on BharatDrop Android. Select a folder below, or transfer the current open folder.", 9.0f, Color.FromArgb(76, 87, 111), false);
+            var hint = LabelX("Enter the 6-digit PIN shown on FileSetu Android. Select a folder below, or transfer the current open folder.", 9.0f, Color.FromArgb(76, 87, 111), false);
             hint.Dock = DockStyle.Fill;
             hint.TextAlign = ContentAlignment.MiddleLeft;
             g.SetColumnSpan(hint, 7);
