@@ -105,10 +105,14 @@ namespace FlashDropTurbo
 
             control = new TcpClient();
             control.NoDelay = true;
-            control.ReceiveBufferSize = 4 * 1024 * 1024;
+            control.Client.SetSocketOption(
+                SocketOptionLevel.Socket,
+                SocketOptionName.KeepAlive,
+                true);
+            control.ReceiveBufferSize = 8 * 1024 * 1024;
             control.SendBufferSize = 1024 * 1024;
 
-            await ConnectTcpAsync(control, host, port, 6000, token);
+            await ConnectTcpAsync(control, host, port, 15000, token);
 
             stream = control.GetStream();
             stream.ReadTimeout = 30000;
@@ -118,7 +122,7 @@ namespace FlashDropTurbo
             writer.NewLine = "\r\n";
             writer.AutoFlush = true;
 
-            var hello = await ReadResponseAsync(8000, token);
+            var hello = await ReadResponseAsync(20000, token);
             Expect(hello, 220);
 
             var u = await CommandAsync("USER bharat", token);
@@ -201,7 +205,8 @@ namespace FlashDropTurbo
             int bufferBytes,
             CancellationToken token,
             Action<int> onBytes,
-            Action waitIfPaused)
+            Action waitIfPaused,
+            Action<RemoteFile, string> onSkipped)
         {
             EnsureConnected();
 
@@ -243,7 +248,7 @@ namespace FlashDropTurbo
 
             await writer.FlushAsync();
 
-            var begin = await ReadResponseAsync(20000, token);
+            var begin = await ReadResponseAsync(45000, token);
 
             if (begin.Code != 150)
                 throw new IOException("Packed batch rejected: " + begin.Text);
@@ -255,10 +260,14 @@ namespace FlashDropTurbo
                 token.ThrowIfCancellationRequested();
                 if (waitIfPaused != null) waitIfPaused();
 
-                var header = await ReadResponseAsync(30000, token);
+                var header = await ReadResponseAsync(45000, token);
 
                 if (header.Code == 550)
-                    throw new IOException("Phone file unavailable: " + files[i].RemotePath);
+                {
+                    if (onSkipped != null)
+                        onSkipped(files[i], "Source file unavailable or changed during transfer");
+                    continue;
+                }
 
                 if (header.Code != 151)
                     throw new IOException("Invalid packed file header: " + header.Text);
@@ -283,11 +292,26 @@ namespace FlashDropTurbo
                     throw new IOException("Packed stream file order mismatch");
 
                 var file = files[i];
+                long requestedOffset = offsets[i];
+                long offset = Math.Min(requestedOffset, total);
 
+                if (requestedOffset > total)
+                {
+                    // The source shrank after the manifest was built.
+                    // The server has no payload for this item at this offset.
+                    var shrinkEnd = await ReadResponseAsync(30000, token);
+                    try { if (File.Exists(file.PartPath)) File.Delete(file.PartPath); } catch { }
+
+                    if (onSkipped != null)
+                        onSkipped(file, "Source changed while copying; retry on next transfer");
+
+                    continue;
+                }
+
+                // WhatsApp/database/temp files can grow between scan and copy.
+                // Use the latest server size rather than failing the entire 500-file batch.
                 if (total != file.Size)
-                    throw new IOException("Phone file size changed: " + file.RemotePath);
-
-                long offset = offsets[i];
+                    file.Size = total;
 
                 if (offset + length != total)
                     throw new IOException("Packed resume range mismatch: " + file.RemotePath);
@@ -323,7 +347,7 @@ namespace FlashDropTurbo
                             transferBuffer,
                             0,
                             want,
-                            30000,
+                            60000,
                             token);
 
                         if (n <= 0)
@@ -339,7 +363,7 @@ namespace FlashDropTurbo
                     }
                 }
 
-                var end = await ReadResponseAsync(15000, token);
+                var end = await ReadResponseAsync(30000, token);
 
                 if (end.Code != 152)
                     throw new IOException("Packed file did not finish: " + end.Text);
@@ -347,7 +371,7 @@ namespace FlashDropTurbo
                 FinalizeLocalFile(file);
             }
 
-            var done = await ReadResponseAsync(15000, token);
+            var done = await ReadResponseAsync(30000, token);
 
             if (done.Code != 226)
                 throw new IOException("Packed batch did not finish: " + done.Text);
@@ -417,21 +441,4 @@ namespace FlashDropTurbo
 
                 if (!File.Exists(file.FinalPath))
                 {
-                    verifyErrors.Enqueue(file.RemotePath + " : local file missing");
-                    continue;
-                }
-
-                var info = new FileInfo(file.FinalPath);
-                if (info.Length != remoteSize)
-                {
-                    verifyErrors.Enqueue(file.RemotePath + " : size mismatch");
-                    continue;
-                }
-
-                string localHash = Sha256File(file.FinalPath, token, waitIfPaused);
-
-                if (!string.Equals(localHash, remoteHash, StringComparison.OrdinalIgnoreCase))
-                    verifyErrors.Enqueue(file.RemotePath + " : SHA-256 mismatch");
-            }
-
-            var done = await ReadResponseAsync(3
+           
