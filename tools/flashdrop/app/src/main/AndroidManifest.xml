@@ -15,7 +15,7 @@
     <application
         android:allowBackup="false"
         android:fullBackupContent="false"
-        android:label="BharatDrop"
+        android:label="FileSetu"
         android:icon="@drawable/ic_bharatdrop"
         android:roundIcon="@drawable/ic_bharatdrop"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
