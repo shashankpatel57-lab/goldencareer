@@ -134,7 +134,7 @@ public class MainActivity extends Activity {
         hero.addView(badge);
 
         TextView brand = text(
-                "BharatDrop",
+                "FileSetu",
                 34,
                 Color.WHITE,
                 true);
@@ -171,7 +171,7 @@ public class MainActivity extends Activity {
         top.addView(statusDot);
 
         statusText = text(
-                "BharatDrop is stopped",
+                "FileSetu is stopped",
                 17,
                 Color.rgb(45, 58, 77),
                 true);
@@ -204,7 +204,7 @@ public class MainActivity extends Activity {
         card.addView(pinText);
 
         TextView pinHint = text(
-                "Enter this PIN in BharatDrop Desktop on your Windows PC.",
+                "Enter this PIN in FileSetu Desktop on your Windows PC.",
                 12,
                 Color.rgb(103, 112, 128),
                 false);
@@ -242,7 +242,7 @@ public class MainActivity extends Activity {
         root.addView(card);
 
         card.addView(text(
-                "BharatDrop Desktop",
+                "FileSetu Desktop",
                 20,
                 Color.rgb(20, 58, 92),
                 true));
@@ -307,8 +307,8 @@ public class MainActivity extends Activity {
 
         TextView steps = text(
                 "1. Put the phone and PC on the same Wi-Fi / hotspot.\n" +
-                "2. Start BharatDrop on the phone.\n" +
-                "3. Open BharatDrop Desktop on Windows.\n" +
+                "2. Start FileSetu on the phone.\n" +
+                "3. Open FileSetu Desktop on Windows.\n" +
                 "4. Auto Detect → enter the PIN shown above → select a phone folder → Transfer.",
                 13,
                 Color.rgb(58, 70, 88),
@@ -333,7 +333,7 @@ public class MainActivity extends Activity {
                 true));
 
         TextView body = text(
-                "BharatDrop does not upload your files to our servers, does not create a cloud account, and does not retain transferred files or transfer history on any developer-controlled server. Transfer happens directly on your local network.",
+                "FileSetu does not upload your files to our servers, does not create a cloud account, and does not retain transferred files or transfer history on any developer-controlled server. Transfer happens directly on your local network.",
                 13,
                 Color.rgb(55, 78, 68),
                 false);
@@ -364,7 +364,7 @@ public class MainActivity extends Activity {
         card.addView(permissionText);
 
         TextView why = text(
-                "BharatDrop needs broad file access because its core purpose is transferring user-selected folders from shared storage to your PC.",
+                "FileSetu needs broad file access because its core purpose is transferring user-selected folders from shared storage to your PC.",
                 12,
                 Color.rgb(103, 112, 128),
                 false);
@@ -415,7 +415,7 @@ public class MainActivity extends Activity {
 
         Toast.makeText(
                 this,
-                "Starting BharatDrop…",
+                "Starting FileSetu…",
                 Toast.LENGTH_SHORT).show();
 
         handler.postDelayed(this::refreshUi, 700);
@@ -432,7 +432,7 @@ public class MainActivity extends Activity {
         if (value == null) {
             Toast.makeText(
                     this,
-                    "Start BharatDrop first",
+                    "Start FileSetu first",
                     Toast.LENGTH_SHORT).show();
             return;
         }
@@ -510,8 +510,8 @@ public class MainActivity extends Activity {
 
         statusText.setText(
                 running
-                        ? "BharatDrop is ready"
-                        : "BharatDrop is stopped");
+                        ? "FileSetu is ready"
+                        : "FileSetu is stopped");
 
         pinText.setText(
                 running
