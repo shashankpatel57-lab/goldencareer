@@ -230,7 +230,7 @@ ists(f.FinalPath))
         {
             using (var f = new FolderBrowserDialog
             {
-                Description = "Choose where BharatDrop should save the phone folder",
+                Description = "Choose where FileSetu should save the phone folder",
                 ShowNewFolderButton = true,
                 SelectedPath = Directory.Exists(localBox.Text) ? localBox.Text : ""
             })
