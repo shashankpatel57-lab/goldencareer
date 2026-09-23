@@ -48,7 +48,7 @@ public class FtpFileServer {
 
         pool = new ThreadPoolExecutor(4, 32, 60L, TimeUnit.SECONDS,
                 new LinkedBlockingQueue<Runnable>(128), r -> {
-            Thread t = new Thread(r, "BharatDropFTP");
+            Thread t = new Thread(r, "FileSetuFTP");
             t.setDaemon(true);
             return t;
         }, new ThreadPoolExecutor.CallerRunsPolicy());
@@ -65,7 +65,7 @@ public class FtpFileServer {
                     if (!running) break;
                 }
             }
-        }, "BharatDropFTPAccept");
+        }, "FileSetuFTPAccept");
         acceptThread.setDaemon(true);
         acceptThread.start();
     }
@@ -90,7 +90,7 @@ public class FtpFileServer {
              BufferedReader in = new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8));
              BufferedWriter out = new BufferedWriter(new OutputStreamWriter(s.getOutputStream(), StandardCharsets.UTF_8))) {
 
-            reply(out, 220, "BharatDrop Secure FTP ready");
+            reply(out, 220, "FileSetu Secure FTP ready");
             String line;
             while (running && (line = in.readLine()) != null) {
                 String cmd;
@@ -100,7 +100,7 @@ public class FtpFileServer {
                 else { cmd = line.substring(0, sp).trim().toUpperCase(Locale.US); arg = line.substring(sp + 1).trim(); }
 
                 if ("USER".equals(cmd)) {
-                    reply(out, 331, "BharatDrop PIN required");
+                    reply(out, 331, "FileSetu PIN required");
                     continue;
                 }
                 if ("PASS".equals(cmd)) {
@@ -109,7 +109,7 @@ public class FtpFileServer {
                         reply(out, 230, "Logged in - secure read only");
                     } else {
                         loggedIn = false;
-                        reply(out, 530, "Incorrect BharatDrop PIN");
+                        reply(out, 530, "Incorrect FileSetu PIN");
                     }
                     continue;
                 }
@@ -118,7 +118,7 @@ public class FtpFileServer {
                     break;
                 }
                 if (!loggedIn) {
-                    reply(out, 530, "Please login using the BharatDrop PIN");
+                    reply(out, 530, "Please login using the FileSetu PIN");
                     continue;
                 }
 
@@ -268,7 +268,7 @@ public class FtpFileServer {
                         handleHashBatch(in, out, arg);
                         break;
                     case "STAT":
-                        reply(out, 211, "BharatDrop ready; secure read-only shared storage");
+                        reply(out, 211, "FileSetu ready; secure read-only shared storage");
                         break;
                     case "STOR": case "APPE": case "DELE": case "RMD": case "XRMD":
                     case "MKD": case "XMKD": case "RNFR": case "RNTO": case "SITE":
