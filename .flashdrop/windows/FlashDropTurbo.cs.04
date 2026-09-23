@@ -1,17 +1,4 @@
-iles)
-                {
-                    token.ThrowIfCancellationRequested();
-                    Directory.CreateDirectory(Path.GetDirectoryName(f.FinalPath));
-
-                    if (f.Size == 0)
-                    {
-                        if (!File.Exists(f.FinalPath))
-                            File.WriteAllBytes(f.FinalPath, new byte[0]);
-                        continue;
-                    }
-
-                    if (File.Exists(f.FinalPath) &&
-                        new FileInfo(f.FinalPath).Length == f.Size)
+   new FileInfo(f.FinalPath).Length == f.Size)
                     {
                         already += f.Size;
                         continue;
@@ -63,6 +50,7 @@ iles)
                     false);
 
                 var errors = new ConcurrentQueue<string>();
+                var skipped = new ConcurrentQueue<string>();
                 var tasks = new List<Task>();
 
                 foreach (var lane in lanes)
@@ -115,7 +103,9 @@ iles)
                                         n => Interlocked.Add(
                                             ref completedBytes,
                                             n),
-                                        WaitIfPaused);
+                                        WaitIfPaused,
+                                        (f, reason) => skipped.Enqueue(
+                                            f.RemotePath + " : " + reason));
 
                                     ok = true;
                                 }
@@ -128,7 +118,17 @@ iles)
                                     last = ex;
 
                                     if (attempt < 12)
-                                        Thread.Sleep(Math.Min(3000, 250 * attempt));
+                                    {
+                                        int stagger = 0;
+                                        try {
+                                            stagger = Convert.ToInt32(
+                                                Hash8(batch[0].RemotePath).Substring(0, 2),
+                                                16);
+                                        } catch { }
+                                        Thread.Sleep(Math.Min(
+                                            6000,
+                                            450 * attempt + stagger));
+                                    }
                                 }
                                 finally
                                 {
@@ -173,7 +173,9 @@ iles)
                                                 bufferBytes,
                                                 token,
                                                 n => Interlocked.Add(ref completedBytes, n),
-                                                WaitIfPaused);
+                                                WaitIfPaused,
+                                                (sf, reason) => skipped.Enqueue(
+                                                    sf.RemotePath + " : " + reason));
 
                                             recovered =
                                                 File.Exists(f.FinalPath) &&
@@ -184,7 +186,7 @@ iles)
                                         {
                                             fileLast = ex;
                                             if (r < 6)
-                                                Thread.Sleep(Math.Min(2500, 350 * r));
+                                                Thread.Sleep(Math.Min(5000, 600 * r));
                                         }
                                         finally
                                         {
@@ -261,7 +263,7 @@ iles)
                 UpdateSpeed();
 
                 if (reportCheck.Checked)
-                    WriteTransferReport(destRoot, files, errors, verifyErrors);
+                    WriteTransferReport(destRoot, files, errors, verifyErrors, skipped);
 
                 bool clean = errors.IsEmpty &&
                              verifyErrors.IsEmpty &&
@@ -284,7 +286,9 @@ iles)
                     SetStatus(
                         "Finished with " +
                         (errors.Count + verifyErrors.Count) +
-                        " issue(s). Resume will continue from partial data next time." +
+                        " error(s)" +
+                        (skipped.IsEmpty ? "" : " and " + skipped.Count + " skipped changing/unavailable file(s)") +
+                        ". Resume will continue automatically from partial data." +
                         (reportCheck.Checked ? " Report saved in destination." : ""),
                         true);
                 }
@@ -344,7 +348,8 @@ iles)
             string destRoot,
             List<RemoteFile> files,
             ConcurrentQueue<string> errors,
-            ConcurrentQueue<string> verifyErrors)
+            ConcurrentQueue<string> verifyErrors,
+            ConcurrentQueue<string> skipped)
         {
             try
             {
@@ -356,11 +361,4 @@ iles)
 
                 using (var sw = new StreamWriter(report, false, new UTF8Encoding(true)))
                 {
-                    sw.WriteLine("Status,Remote Path,Local Path,Expected Bytes,Actual Bytes,Details");
-
-                    foreach (var f in files)
-                    {
-                        long actual = 0;
-                        try
-                        {
-                            if (File.Ex
+                    sw.WriteLine("Status,Remote Path,Local 
