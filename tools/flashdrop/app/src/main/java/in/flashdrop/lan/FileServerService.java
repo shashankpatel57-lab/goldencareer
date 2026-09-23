@@ -6,6 +6,7 @@ import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Environment;
@@ -24,6 +25,8 @@ public class FileServerService extends Service {
     private static volatile String httpUrl;
     private static volatile String ftpUrl;
     private static volatile String pin = "------";
+    private static final String PREFS = "filesetu_session";
+    private static final String KEY_PIN = "session_pin";
     private static volatile HttpFileServer httpServer;
     private static volatile FtpFileServer ftpServer;
     private static PowerManager.WakeLock wakeLock;
@@ -36,7 +39,7 @@ public class FileServerService extends Service {
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && ACTION_STOP.equals(intent.getAction())) {
-            stopServer();
+            stopServer(true);
             stopForeground(true);
             stopSelf();
             return START_NOT_STICKY;
@@ -49,7 +52,7 @@ public class FileServerService extends Service {
         if (running) return;
         try {
             acquireLocks();
-            pin = String.format(Locale.US, "%06d", new SecureRandom().nextInt(1_000_000));
+            pin = getOrCreateSessionPin();
             File root = Environment.getExternalStorageDirectory();
 
             byte[] turbo = loadTurboHelper();
@@ -70,7 +73,7 @@ public class FileServerService extends Service {
             running = false;
             httpUrl = null;
             ftpUrl = null;
-            stopServer();
+            stopServer(false);
             stopForeground(true);
             stopSelf();
         }
@@ -90,7 +93,7 @@ public class FileServerService extends Service {
         }
     }
 
-    private synchronized void stopServer() {
+    private synchronized void stopServer(boolean clearSession) {
         running = false;
         httpUrl = null;
         ftpUrl = null;
@@ -103,6 +106,39 @@ public class FileServerService extends Service {
             ftpServer = null;
         }
         releaseLocks();
+
+        if (clearSession) {
+            try {
+                getSharedPreferences(PREFS, MODE_PRIVATE)
+                        .edit()
+                        .remove(KEY_PIN)
+                        .apply();
+            } catch (Exception ignored) {}
+            pin = "------";
+        }
+    }
+
+    private String getOrCreateSessionPin() {
+        try {
+            SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+            String existing = prefs.getString(KEY_PIN, null);
+
+            if (existing != null && existing.matches("\\d{6}"))
+                return existing;
+
+            String created = String.format(
+                    Locale.US,
+                    "%06d",
+                    new SecureRandom().nextInt(1_000_000));
+
+            prefs.edit().putString(KEY_PIN, created).commit();
+            return created;
+        } catch (Exception e) {
+            return String.format(
+                    Locale.US,
+                    "%06d",
+                    new SecureRandom().nextInt(1_000_000));
+        }
     }
 
     private void acquireLocks() {
@@ -144,7 +180,9 @@ public class FileServerService extends Service {
     }
 
     @Override public void onDestroy() {
-        stopServer();
+        // Keep the session PIN when Android recreates the foreground service.
+        // A new PIN is generated only after the user explicitly presses STOP.
+        stopServer(false);
         super.onDestroy();
     }
 
