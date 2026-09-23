@@ -1,4 +1,12 @@
-                 " seconds");
+           var winner = await Task.WhenAny(task, Task.Delay(timeoutMs, token));
+
+            if (winner != task)
+            {
+                token.ThrowIfCancellationRequested();
+                throw new IOException(
+                    "No data received for " +
+                    (timeoutMs / 1000) +
+                    " seconds");
             }
 
             return await task;
@@ -214,7 +222,7 @@
 
         public MainForm()
         {
-            Text = "FileSetu Desktop v5.2 - by Shashank Patel";
+            Text = "FileSetu Desktop v5.3 - by Shashank Patel";
             StartPosition = FormStartPosition.CenterScreen;
             MinimumSize = new Size(1000, 720);
             Size = new Size(1180, 820);
@@ -384,4 +392,7 @@
             remoteList.Columns.Add("Type", 105);
             remoteList.Columns.Add("Size", 125);
             remoteList.Columns.Add("Modified", 180);
-            remoteList.DoubleClick += async (s, e) => await OpenSelectedA
+            remoteList.DoubleClick += async (s, e) => await OpenSelectedAsync();
+            browser.Controls.Add(remoteList, 0, 1);
+
+            var destCard
