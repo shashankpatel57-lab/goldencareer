@@ -1,4 +1,21 @@
-0000, token);
+         verifyErrors.Enqueue(file.RemotePath + " : local file missing");
+                    continue;
+                }
+
+                var info = new FileInfo(file.FinalPath);
+                if (info.Length != remoteSize)
+                {
+                    verifyErrors.Enqueue(file.RemotePath + " : size mismatch");
+                    continue;
+                }
+
+                string localHash = Sha256File(file.FinalPath, token, waitIfPaused);
+
+                if (!string.Equals(localHash, remoteHash, StringComparison.OrdinalIgnoreCase))
+                    verifyErrors.Enqueue(file.RemotePath + " : SHA-256 mismatch");
+            }
+
+            var done = await ReadResponseAsync(30000, token);
             if (done.Code != 226)
                 throw new IOException("Verification did not finish: " + done.Text);
         }
@@ -349,7 +366,7 @@
             data.NoDelay = true;
             data.ReceiveBufferSize = 4 * 1024 * 1024;
 
-            await ConnectTcpAsync(data, host, dataPort, 6000, token);
+            await ConnectTcpAsync(data, host, dataPort, 12000, token);
             return data;
         }
 
@@ -360,7 +377,7 @@
             await writer.WriteLineAsync(command);
             await writer.FlushAsync();
 
-            return await ReadResponseAsync(12000, token);
+            return await ReadResponseAsync(30000, token);
         }
 
         async Task<FtpResponse> ReadResponseAsync(int timeoutMs, CancellationToken token)
@@ -437,12 +454,4 @@
             CancellationToken token)
         {
             var task = input.ReadAsync(buffer, offset, count, token);
-            var winner = await Task.WhenAny(task, Task.Delay(timeoutMs, token));
-
-            if (winner != task)
-            {
-                token.ThrowIfCancellationRequested();
-                throw new IOException(
-                    "No data received for " +
-                    (timeoutMs / 1000) +
-   
+ 
