@@ -65,7 +65,7 @@ public class FileServerService extends Service {
             running = true;
 
             NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-            nm.notify(1001, buildNotification("BharatDrop packed transfer active • " + ftpUrl));
+            nm.notify(1001, buildNotification("FileSetu packed transfer active • " + ftpUrl));
         } catch (Exception e) {
             running = false;
             httpUrl = null;
@@ -108,13 +108,13 @@ public class FileServerService extends Service {
     private void acquireLocks() {
         try {
             PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
-            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BharatDrop:TransferWake");
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "FileSetu:TransferWake");
             wakeLock.setReferenceCounted(false);
             wakeLock.acquire();
         } catch (Exception ignored) {}
         try {
             WifiManager wm = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-            wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "BharatDrop:HighPerfWifi");
+            wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "FileSetu:HighPerfWifi");
             wifiLock.setReferenceCounted(false);
             wifiLock.acquire();
         } catch (Exception ignored) {}
@@ -131,12 +131,12 @@ public class FileServerService extends Service {
         NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         String channelId = "bharatdrop_transfer";
         if (Build.VERSION.SDK_INT >= 26) {
-            NotificationChannel ch = new NotificationChannel(channelId, "BharatDrop transfers", NotificationManager.IMPORTANCE_LOW);
+            NotificationChannel ch = new NotificationChannel(channelId, "FileSetu transfers", NotificationManager.IMPORTANCE_LOW);
             ch.setDescription("Keeps secure local phone-to-PC transfers active");
             nm.createNotificationChannel(ch);
         }
         Notification.Builder b = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(this, channelId) : new Notification.Builder(this);
-        return b.setContentTitle("BharatDrop")
+        return b.setContentTitle("FileSetu")
                 .setContentText(content)
                 .setSmallIcon(android.R.drawable.stat_sys_upload_done)
                 .setOngoing(true)
